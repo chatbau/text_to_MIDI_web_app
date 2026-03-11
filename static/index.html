@@ -162,8 +162,14 @@
       }
       .access-row {
         display: grid;
-        grid-template-columns: 1fr 1fr;
+        grid-template-columns: 1fr;
         gap: 8px;
+      }
+      .access-help {
+        color: var(--muted);
+        font-size: 11px;
+        margin-top: 8px;
+        line-height: 1.35;
       }
       .access-actions {
         display: flex;
@@ -651,15 +657,16 @@
               <div class="access-row">
                 <input id="authEmail" type="email" placeholder="Email" autocomplete="email" />
                 <input id="authPassword" type="password" placeholder="Password (min 8 chars)" autocomplete="current-password" />
+                <input id="authPasswordConfirm" type="password" placeholder="Confirm password (for new account)" autocomplete="new-password" />
               </div>
               <div class="access-actions">
-                <button id="authRegister" class="btn-secondary" type="button">Register</button>
-                <button id="authLogin" class="btn-secondary" type="button">Login</button>
+                <button id="authContinue" class="btn-secondary" type="button">Continue</button>
                 <button id="authLogout" class="btn-secondary" type="button">Logout</button>
                 <button id="stripeCheckout" class="btn-secondary" type="button">Pay with Stripe</button>
                 <button id="patreonConnect" class="btn-secondary" type="button">Connect Patreon</button>
                 <button id="billingManage" class="btn-secondary" type="button">Manage Billing</button>
               </div>
+              <div class="access-help">Use <strong>Continue</strong> to sign in. If account does not exist, it will create one (password + confirm must match).</div>
               <div id="accessStatus" class="access-status">Checking account status...</div>
             </div>
           </div>
@@ -723,8 +730,8 @@
       const loopGapInput = document.getElementById('loop_gap_ms');
       const authEmailInput = document.getElementById('authEmail');
       const authPasswordInput = document.getElementById('authPassword');
-      const authRegisterBtn = document.getElementById('authRegister');
-      const authLoginBtn = document.getElementById('authLogin');
+      const authPasswordConfirmInput = document.getElementById('authPasswordConfirm');
+      const authContinueBtn = document.getElementById('authContinue');
       const authLogoutBtn = document.getElementById('authLogout');
       const stripeCheckoutBtn = document.getElementById('stripeCheckout');
       const patreonConnectBtn = document.getElementById('patreonConnect');
@@ -772,6 +779,19 @@
         stopMidiBtn.disabled = !paid;
       }
 
+      function setAccessActionVisibility() {
+        const logged = !!currentAccount.logged_in;
+        const paid = !!currentAccount.paid_access;
+        authContinueBtn.style.display = logged ? 'none' : '';
+        authLogoutBtn.style.display = logged ? '' : 'none';
+        stripeCheckoutBtn.style.display = (logged && !paid) ? '' : 'none';
+        patreonConnectBtn.style.display = (logged && !paid) ? '' : 'none';
+        billingManageBtn.style.display = (logged && paid) ? '' : 'none';
+        authEmailInput.disabled = logged;
+        authPasswordInput.disabled = logged;
+        authPasswordConfirmInput.disabled = logged;
+      }
+
       function setAccessStatus(text) {
         accessStatusEl.textContent = text;
       }
@@ -799,7 +819,7 @@
           const payload = await res.json();
           currentAccount = payload.user || { logged_in: false, paid_access: false };
           if (!currentAccount.logged_in) {
-            setAccessStatus('Not logged in. Register/login, then pay via Stripe or connect Patreon.');
+            setAccessStatus('Not logged in.');
           } else if (!currentAccount.paid_access) {
             setAccessStatus(`Logged in as ${currentAccount.email}. No paid access yet.`);
           } else {
@@ -811,6 +831,7 @@
           setAccessStatus('Could not load account status.');
         }
         setPaidUiState();
+        setAccessActionVisibility();
       }
 
       function ensureAudioContext() {
@@ -1173,37 +1194,40 @@
         }
       }
 
-      authRegisterBtn.addEventListener('click', async () => {
+      authContinueBtn.addEventListener('click', async () => {
         try {
           const email = (authEmailInput.value || '').trim();
           const password = authPasswordInput.value || '';
+          const confirm = authPasswordConfirmInput.value || '';
           if (!email || !password) throw new Error('Enter email and password.');
-          await apiFormPost('/api/auth/register', { email, password });
+          let didLogin = false;
+          try {
+            await apiFormPost('/api/auth/login', { email, password });
+            didLogin = true;
+          } catch (loginErr) {
+            if (!confirm) {
+              throw new Error('Account not found or wrong password. For new account, fill Confirm password and continue.');
+            }
+            if (password !== confirm) {
+              throw new Error('Password and confirm password must match.');
+            }
+            await apiFormPost('/api/auth/register', { email, password });
+          }
           authPasswordInput.value = '';
+          authPasswordConfirmInput.value = '';
           await refreshAccessState();
-          statusEl.textContent = 'Registered and logged in.';
+          statusEl.textContent = didLogin ? 'Signed in.' : 'Account created and signed in.';
         } catch (err) {
-          statusEl.textContent = err.message || 'Register failed.';
-        }
-      });
-
-      authLoginBtn.addEventListener('click', async () => {
-        try {
-          const email = (authEmailInput.value || '').trim();
-          const password = authPasswordInput.value || '';
-          if (!email || !password) throw new Error('Enter email and password.');
-          await apiFormPost('/api/auth/login', { email, password });
-          authPasswordInput.value = '';
-          await refreshAccessState();
-          statusEl.textContent = 'Logged in.';
-        } catch (err) {
-          statusEl.textContent = err.message || 'Login failed.';
+          statusEl.textContent = err.message || 'Could not continue.';
         }
       });
 
       authLogoutBtn.addEventListener('click', async () => {
         try {
           await apiFormPost('/api/auth/logout');
+          authEmailInput.value = '';
+          authPasswordInput.value = '';
+          authPasswordConfirmInput.value = '';
           await refreshAccessState();
           statusEl.textContent = 'Logged out.';
         } catch (err) {
