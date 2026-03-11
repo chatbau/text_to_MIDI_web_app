@@ -818,6 +818,28 @@
           const res = await fetch('/api/auth/me');
           const payload = await res.json();
           currentAccount = payload.user || { logged_in: false, paid_access: false };
+          const params = new URLSearchParams(window.location.search);
+          const billing = params.get('billing');
+          const sessionId = params.get('session_id');
+          if (currentAccount.logged_in && !currentAccount.paid_access) {
+            try {
+              if (billing === 'success' && sessionId) {
+                const confirmRes = await fetch(`/api/billing/stripe/confirm?session_id=${encodeURIComponent(sessionId)}`);
+                const confirmPayload = await confirmRes.json();
+                if (confirmRes.ok && confirmPayload.user) {
+                  currentAccount = confirmPayload.user;
+                }
+              } else {
+                const syncRes = await fetch('/api/billing/stripe/sync', { method: 'POST' });
+                const syncPayload = await syncRes.json();
+                if (syncRes.ok && syncPayload.user) {
+                  currentAccount = syncPayload.user;
+                }
+              }
+            } catch (_) {
+              // best-effort sync
+            }
+          }
           if (!currentAccount.logged_in) {
             setAccessStatus('Not logged in.');
           } else if (!currentAccount.paid_access) {

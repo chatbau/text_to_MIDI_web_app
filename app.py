@@ -1105,7 +1105,7 @@ def stripe_checkout(request: Request):
         mode=checkout_mode,
         customer=customer_id,
         line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
-        success_url=f"{APP_BASE_URL}/?billing=success",
+        success_url=f"{APP_BASE_URL}/?billing=success&session_id={{CHECKOUT_SESSION_ID}}",
         cancel_url=f"{APP_BASE_URL}/?billing=cancel",
         client_reference_id=str(user["id"]),
         allow_promotion_codes=True,
@@ -1173,6 +1173,77 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(defaul
                         )
                 conn.commit()
     return {"ok": True}
+
+
+def _mark_paid_from_checkout_session(session_obj) -> bool:
+    customer_id = str(session_obj.get("customer") or "")
+    if not customer_id:
+        return False
+    payment_status = str(session_obj.get("payment_status") or "").lower()
+    mode = str(session_obj.get("mode") or "").lower()
+    status = str(session_obj.get("status") or "").lower()
+    if mode not in {"payment", "subscription"}:
+        return False
+    if payment_status not in {"paid", "no_payment_required"} and status != "complete":
+        return False
+    with _db() as conn:
+        user = conn.execute("SELECT * FROM users WHERE stripe_customer_id = ?", (customer_id,)).fetchone()
+        if not user:
+            return False
+        conn.execute(
+            "UPDATE users SET entitlement_source = 'stripe', paid_until = NULL WHERE id = ?",
+            (int(user["id"]),),
+        )
+        conn.commit()
+    return True
+
+
+@app.post("/api/billing/stripe/sync")
+def stripe_sync(request: Request):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required.")
+    if not stripe or not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Stripe is not configured.")
+    customer_id = (user["stripe_customer_id"] or "").strip()
+    if not customer_id:
+        return {"ok": False, "reason": "no_customer", "user": public_user_payload(user)}
+    try:
+        sessions = stripe.checkout.Session.list(customer=customer_id, limit=20)
+        data = sessions.get("data", []) if hasattr(sessions, "get") else sessions.data
+        granted = False
+        for sess in data or []:
+            if _mark_paid_from_checkout_session(sess):
+                granted = True
+                break
+        fresh = get_user_by_id(int(user["id"])) or user
+        return {"ok": True, "granted": granted, "user": public_user_payload(fresh)}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Stripe sync failed: {exc}")
+
+
+@app.get("/api/billing/stripe/confirm")
+def stripe_confirm(request: Request, session_id: str = Query(default="")):
+    user = get_current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="Login required.")
+    if not stripe or not STRIPE_SECRET_KEY:
+        raise HTTPException(status_code=500, detail="Stripe is not configured.")
+    sid = str(session_id or "").strip()
+    if not sid:
+        raise HTTPException(status_code=400, detail="Missing session_id.")
+    try:
+        sess = stripe.checkout.Session.retrieve(sid)
+        customer_id = str(sess.get("customer") or "")
+        if customer_id and user["stripe_customer_id"] and customer_id != str(user["stripe_customer_id"]):
+            raise HTTPException(status_code=403, detail="Session does not belong to this user.")
+        granted = _mark_paid_from_checkout_session(sess)
+        fresh = get_user_by_id(int(user["id"])) or user
+        return {"ok": True, "granted": granted, "user": public_user_payload(fresh)}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Stripe confirm failed: {exc}")
 
 
 @app.get("/api/billing/patreon/connect")
