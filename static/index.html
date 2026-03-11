@@ -1,0 +1,1700 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>text_to_MIDI</title>
+    <style>
+      :root {
+        --bg:#100909;
+        --panel:#1a1010;
+        --ink:#f2e6d4;
+        --line:#4f3a2f;
+        --accent:#fcc86e;
+        --muted:#bba790;
+        --danger:#ff8e8e;
+      }
+      html, body {
+        min-height: 100%;
+        background: radial-gradient(circle at 18% 10%, #1b1111, #060606 58%);
+      }
+      body { margin:0; font-family: "SF Mono","Menlo","Monaco","Cascadia Code","Consolas",monospace; color:var(--ink); position: relative; overflow-x: hidden; }
+      #ambienceBgVideo {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 0;
+        transition: opacity 900ms ease;
+        filter: brightness(0.62) saturate(1.15) contrast(1.04);
+      }
+      body.ambience-active #ambienceBgVideo { opacity: 1; }
+      .wrap { max-width: 860px; margin: 30px auto; padding: 16px; position: relative; z-index: 2; }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:18px; box-shadow: 0 14px 36px rgba(0,0,0,.45); position: relative; z-index: 2; }
+      h1 { margin:0 0 3px; font-size:26px; letter-spacing:.5px; color:#f5efe5; font-family:"Degular Black","Degular","SF Pro Display","Helvetica Neue",sans-serif; font-weight:900; }
+      .title-midi { color: var(--accent); }
+      .title-underscore { color:#ffffff; }
+      p { margin:0 0 6px; color: var(--muted); line-height:1.15; }
+      textarea, input, select, button { width:100%; box-sizing:border-box; border-radius:2px; border:1px solid var(--line); padding:10px 12px; font-size:14px; font-family: inherit; background:#090909; color:var(--ink); }
+      input, select, button { min-height: 44px; }
+      select {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        padding-right: 38px;
+        background-image:
+          linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+          linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+        background-position:
+          calc(100% - 18px) 53%,
+          calc(100% - 12px) 53%;
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
+      }
+      textarea { min-height: 140px; resize: vertical; line-height: 1.4; }
+      .row { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin:10px 0; }
+      button { background:#121212; color: var(--accent); border: 1px solid #7a5a2b; font-weight: 700; cursor: pointer; margin-top:8px; text-transform: uppercase; letter-spacing: .4px; }
+      .row button { margin-top: 0; }
+      button:disabled { opacity:.6; cursor: progress; }
+      button:hover { filter: brightness(1.08); }
+      button:active { transform: translateY(1px); }
+      .btn-primary { background:#5b3b17; border-color:#fcc86e; color:#fff3dd; font-size:16px; padding:14px 12px; }
+      .btn-secondary { background:#221712; }
+      .btn-random-all { background:#3b2615; border-color:#9f7540; }
+      .btn-with-icon { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+      .btn-icon { width:20px; height:20px; image-rendering: pixelated; }
+      .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+      #status { margin-top: 10px; font-size: 13px; min-height: 20px; color: var(--accent); }
+      .label { font-size: 12px; color: var(--muted); margin: 4px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+      .label-input { color: var(--accent); }
+      .label-output { color: var(--accent); }
+      .session-title { font-size: 14px; font-weight: 800; color: var(--accent); letter-spacing: .7px; }
+      .text-tools { display:flex; justify-content:flex-start; align-items:flex-end; gap:12px; margin-top:0; margin-bottom:6px; }
+      .text-tools button { width:auto; margin-top:0; }
+      .ambience-video-btn {
+        width: 72px;
+        min-width: 72px;
+        max-width: 72px;
+        height: 72px;
+        min-height: 72px;
+        max-height: 72px;
+        flex: 0 0 72px;
+        padding: 0;
+        overflow: hidden;
+        position: relative;
+        background: #17100d;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        margin-top: 0;
+      }
+      #ambienceToggleVideo {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center 145%;
+        transform: scale(2.15);
+        transform-origin: center;
+        display: block;
+        opacity: 0.42;
+        filter: saturate(0.82) brightness(0.66) blur(0.32px);
+        transition: opacity 240ms ease, filter 240ms ease;
+        pointer-events: none;
+      }
+      .ambience-video-btn.btn-toggle-active #ambienceToggleVideo {
+        opacity: 1;
+        filter: saturate(1.15) brightness(1) blur(0);
+      }
+      .btn-toggle-active { background:#5b3b17; border-color:#fcc86e; color:#fff3dd; }
+      .icon-lock-btn { width:44px; min-width:44px; padding:0; display:inline-flex; align-items:center; justify-content:center; line-height:1; }
+      .lock-glyph {
+        width: 24px;
+        height: 24px;
+        display: inline-block;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: contain;
+        image-rendering: pixelated;
+        background-image: url('/lock_icon_locked.png');
+      }
+      .icon-lock-btn.unlocked .lock-glyph {
+        background-image: url('/lock_icon_unlocked.png');
+      }
+      #lockText .lock-glyph {
+        width: 46px;
+        height: 46px;
+        background-image: url('/lock_icon_locked_text.png');
+        transform: none;
+      }
+      #lockText.unlocked .lock-glyph {
+        background-image: url('/lock_icon_unlocked_text.png');
+      }
+      .text-tools #lockText {
+        width: 44px;
+        min-width: 44px;
+        max-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        max-height: 44px;
+        flex: 0 0 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        overflow: visible;
+      }
+      .performance-wrap { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:28px; margin:12px 0 2px; }
+      .control-block { display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:6px; }
+      .synth-dial { width:72px; height:72px; }
+      .synth-dial .dial-inner { width:52px; height:52px; }
+      .bend-label { color: var(--muted); font-size: 11px; letter-spacing:.4px; text-transform: uppercase; min-width: 0; text-align:center; }
+      .dial { --value:0; width:72px; height:72px; border-radius:50%; border:1px solid var(--line); background: conic-gradient(var(--accent) calc(var(--value) * 1%), #3b2a22 0); display:grid; place-items:center; cursor: ns-resize; user-select:none; }
+      .dial:focus { outline: 1px solid var(--accent); }
+      .dial-inner { width:52px; height:52px; border-radius:50%; border:1px solid #5a4334; background:#17100d; display:grid; place-items:center; }
+      .bend-value { min-width: 0; text-align: center; color: var(--accent); font-size: 12px; }
+      .topbar { display:flex; align-items:flex-start; gap:14px; margin-bottom: 4px; }
+      .access-bar {
+        border: 1px solid var(--line);
+        background: #0d0d0d;
+        padding: 10px;
+        margin: 8px 0 10px;
+      }
+      .access-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .access-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .access-actions button {
+        width: auto;
+        min-height: 36px;
+        margin-top: 0;
+      }
+      .access-status {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 8px;
+        min-height: 16px;
+      }
+      .notes-panel { border:1px solid var(--line); background:#0c0c0c; padding:10px; position: relative; min-height: 0; }
+      .notes-panel summary { cursor:pointer; list-style:none; }
+      .notes-panel summary::-webkit-details-marker { display:none; }
+      .notes-title { margin:0; font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; font-weight:700; }
+      .notes-header { margin:0 0 6px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+      .notes-actions { display:flex; align-items:center; gap:8px; }
+      .notes-clear { width:auto; min-height:24px; margin:0; padding:2px 8px; font-size:10px; letter-spacing:.3px; }
+      .notes-meta { margin:0 0 8px; font-size:11px; color:var(--muted); min-height:14px; }
+      .note-feed { border:1px solid var(--line); background:#070707; min-height:200px; max-height:420px; overflow:auto; padding:8px; font-size:12px; }
+      .note-row { display:flex; justify-content:space-between; gap:8px; padding:3px 0; border-bottom:1px dashed rgba(252, 200, 110, 0.12); }
+      .note-row:last-child { border-bottom:0; }
+      .note-name { color:var(--accent); }
+      .portrait { width:64px; height:64px; object-fit:cover; border:1px solid var(--line); border-radius:2px; image-rendering: pixelated; }
+      .title-wrap { flex:1; }
+      .actions-row { display:grid; grid-template-columns: 2fr 1fr 1fr; gap:10px; margin-top: 8px; }
+      #randomizeText,
+      #refreshPorts,
+      #randomizeAll,
+      #stopMidi {
+        border-color: #7a5a2b;
+        color: var(--accent);
+        background: #121212;
+      }
+      .notes-title, .notes-clear { color: var(--accent); border-color: #7a5a2b; }
+      .mapping-info { border:1px solid var(--line); background:#0d0d0d; padding:10px 12px; margin: 14px 0 0; }
+      .mapping-info summary { cursor:pointer; color:var(--accent); font-weight:700; text-transform: uppercase; letter-spacing:.4px; }
+      .mapping-list { margin:8px 0 0 16px; padding:0; color:var(--muted); font-size:12px; line-height:1.45; }
+      .mapping-detail { margin-top:8px; color:var(--muted); font-size:12px; line-height:1.55; }
+      .mapping-detail p { margin:0 0 8px; }
+      .loop-wrap { display:flex; align-items:center; gap:8px; margin-top:8px; color:var(--muted); font-size:12px; }
+      .loop-wrap input[type="checkbox"] { width:16px; height:16px; min-height:0; accent-color: var(--accent); }
+      .loop-gap-control { width:140px; }
+      .loop-gap-control .num-input { min-height:44px; font-size:14px; }
+      .loop-gap-control .step-btn { min-height:22px; }
+      .session-box { border:1px solid var(--line); background:#0d0d0d; padding:12px; margin-top:8px; }
+      .settings-grid { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-top:4px; }
+      .setting-field { display:flex; flex-direction:column; gap:6px; }
+      .shift-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px; }
+      .shift-field { display:flex; flex-direction:column; gap:6px; }
+      .setting-field .label, .shift-field .label { margin:0; }
+      .label-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      .shift-field button { margin-top:0; }
+      .unit-readout { font-size:11px; color:var(--accent); }
+      .num-control { display:grid; grid-template-columns: 1fr 36px; gap:0; }
+      .num-input {
+        min-height: 52px;
+        font-size: 16px;
+        border-right: 0;
+        border-radius: 2px 0 0 2px;
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .num-input::-webkit-outer-spin-button,
+      .num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      .stepper { display:grid; grid-template-rows: 1fr 1fr; border:1px solid var(--line); border-left:0; border-radius:0 2px 2px 0; overflow:hidden; }
+      .step-btn {
+        min-height: 26px;
+        margin:0;
+        border:0;
+        border-top:1px solid var(--line);
+        border-radius:0;
+        padding:0;
+        background:#2b1d14;
+        color:var(--accent);
+        font-size:12px;
+        line-height:1;
+      }
+      .stepper .step-btn:first-child { border-top:0; }
+      .reset-shifts-btn { min-height: 52px; margin-top: 0; }
+      .icon { display:inline-block; vertical-align:middle; margin-right:8px; color:var(--accent); }
+      .icon-die { width:3px; height:3px; box-shadow:
+        0 0 0 1px currentColor,
+        3px 0 0 1px currentColor,
+        6px 0 0 1px currentColor,
+        0 3px 0 1px currentColor,
+        3px 3px 0 1px currentColor,
+        6px 3px 0 1px currentColor,
+        0 6px 0 1px currentColor,
+        3px 6px 0 1px currentColor,
+        6px 6px 0 1px currentColor,
+        1px 1px 0 0 #2a1b18,
+        5px 1px 0 0 #2a1b18,
+        3px 3px 0 0 #2a1b18,
+        1px 5px 0 0 #2a1b18,
+        5px 5px 0 0 #2a1b18; }
+      .icon-save { width:3px; height:3px; box-shadow:
+        0 0 0 1px currentColor,
+        3px 0 0 1px currentColor,
+        6px 0 0 1px currentColor,
+        0 3px 0 1px currentColor,
+        6px 3px 0 1px currentColor,
+        0 6px 0 1px currentColor,
+        3px 6px 0 1px currentColor,
+        6px 6px 0 1px currentColor,
+        0 9px 0 1px currentColor,
+        3px 9px 0 1px currentColor,
+        6px 9px 0 1px currentColor,
+        1px 1px 0 0 #2a1b18,
+        2px 1px 0 0 #2a1b18,
+        4px 1px 0 0 #2a1b18,
+        5px 1px 0 0 #2a1b18,
+        1px 5px 0 0 #2a1b18,
+        2px 5px 0 0 #2a1b18,
+        4px 5px 0 0 #2a1b18,
+        5px 5px 0 0 #2a1b18; }
+      .notes-flyout {
+        position: absolute;
+        top: 16px;
+        left: calc(100% + 8px);
+        width: 320px;
+        z-index: 20;
+      }
+      .notes-flyout .notes-panel {
+        box-shadow: 0 14px 36px rgba(0,0,0,.45);
+      }
+      .notes-flyout .notes-panel > summary {
+        position: absolute;
+        top: 10px;
+        left: -108px;
+        width: 98px;
+        border: 1px solid #7a5a2b;
+        background: #2b1d14;
+        color: var(--accent);
+        text-align: center;
+        padding: 10px 6px;
+        font-size: 10px;
+        letter-spacing: .5px;
+        line-height: 1.2;
+        border-radius: 2px 0 0 2px;
+      }
+      .notes-flyout .notes-panel:not([open]) {
+        width: 104px;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+      .notes-flyout .notes-panel:not([open]) > summary {
+        position: relative;
+        top: 0;
+        left: 0;
+        width: 100%;
+        border-radius: 2px;
+      }
+      .notes-flyout .notes-panel:not([open]) .notes-body {
+        display: none;
+      }
+      .notes-flyout .notes-panel[open] > summary {
+        border-radius: 2px;
+        left: 0;
+        top: -42px;
+        width: auto;
+        min-width: 138px;
+      }
+      .notes-flyout .notes-panel[open] .note-feed {
+        max-height: min(46vh, 420px);
+      }
+      .note-feed::-webkit-scrollbar,
+      textarea::-webkit-scrollbar,
+      select::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      .note-feed::-webkit-scrollbar-track,
+      textarea::-webkit-scrollbar-track,
+      select::-webkit-scrollbar-track {
+        background: #120d0b;
+        border-left: 1px solid #3d2b22;
+      }
+      .note-feed::-webkit-scrollbar-thumb,
+      textarea::-webkit-scrollbar-thumb,
+      select::-webkit-scrollbar-thumb {
+        background: linear-gradient(#6a4a25, #4f361d);
+        border: 1px solid #7a5a2b;
+        border-radius: 2px;
+      }
+      .note-feed::-webkit-scrollbar-thumb:hover,
+      textarea::-webkit-scrollbar-thumb:hover,
+      select::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(#7b562c, #5b3d20);
+      }
+      .note-feed,
+      textarea {
+        scrollbar-color: #6a4a25 #120d0b;
+        scrollbar-width: thin;
+      }
+      @media (max-width: 700px) {
+        .row { grid-template-columns: 1fr; }
+        .actions-row { grid-template-columns: 1fr; }
+        .bend-wrap { justify-content: center; }
+        .text-tools { flex-direction: column; align-items: stretch; }
+        .performance-wrap { grid-template-columns: 1fr; gap:14px; }
+        .notes-flyout {
+          position: fixed;
+          right: 8px;
+          left: auto;
+          top: 8px;
+          width: min(320px, calc(100vw - 16px));
+        }
+        .notes-flyout .notes-panel > summary {
+          left: auto;
+          right: 0;
+          top: 0;
+          border-radius: 2px;
+        }
+        .notes-flyout .notes-panel[open] > summary {
+          top: -42px;
+          right: 0;
+          left: auto;
+        }
+        .note-feed { min-height:160px; max-height:230px; }
+      }
+    </style>
+  </head>
+  <body>
+    <video id="ambienceBgVideo" muted loop playsinline preload="auto">
+      <source src="/flowing_grass_3.mp4" type="video/mp4" />
+    </video>
+    <div class="wrap">
+      <div class="card">
+        <div class="topbar">
+          <img src="/image.jpg" alt="Reference" class="portrait" />
+          <div class="title-wrap">
+            <h1>text<span class="title-underscore">_</span>to<span class="title-underscore">_</span><span class="title-midi">MIDI</span></h1>
+            <p>Type text, pick tempo/key/mode, choose a MIDI output port, then send live to your DAW.</p>
+          </div>
+        </div>
+
+        <div class="access-bar">
+          <div class="label">Account Access</div>
+          <div class="access-row">
+            <input id="authEmail" type="email" placeholder="Email" autocomplete="email" />
+            <input id="authPassword" type="password" placeholder="Password (min 8 chars)" autocomplete="current-password" />
+          </div>
+          <div class="access-actions">
+            <button id="authRegister" class="btn-secondary" type="button">Register</button>
+            <button id="authLogin" class="btn-secondary" type="button">Login</button>
+            <button id="authLogout" class="btn-secondary" type="button">Logout</button>
+            <button id="stripeCheckout" class="btn-secondary" type="button">Pay with Stripe</button>
+            <button id="patreonConnect" class="btn-secondary" type="button">Connect Patreon</button>
+            <button id="billingManage" class="btn-secondary" type="button">Manage Billing</button>
+          </div>
+          <div id="accessStatus" class="access-status">Checking account status...</div>
+        </div>
+
+        <form id="form">
+          <div class="text-tools">
+            <button id="randomizeText" class="btn-secondary" type="button">Randomize Text</button>
+            <button id="lockText" class="btn-secondary icon-lock-btn unlocked" type="button" aria-pressed="false" aria-label="Text unlocked" title="Text unlocked"><span class="lock-glyph" aria-hidden="true"></span></button>
+            <button id="undoState" class="btn-secondary" type="button">Undo</button>
+          </div>
+          <textarea id="text" name="text" placeholder="Type your text here..." required></textarea>
+          <div class="hint">Press <strong>Enter</strong> to send. Use <strong>Shift+Enter</strong> for a new line.</div>
+
+          <div class="label session-title">Session Settings</div>
+          <div class="session-box">
+            <div class="settings-grid">
+              <div class="setting-field">
+                <div class="label-row">
+                  <div class="label">BPM</div>
+                  <div class="unit-readout">20-200</div>
+                </div>
+                <div class="num-control">
+                  <input id="tempo_bpm" class="num-input" name="tempo_bpm" type="number" min="20" max="200" step="1" value="60" />
+                  <div class="stepper">
+                    <button class="step-btn" type="button" data-target="tempo_bpm" data-step="5">▲</button>
+                    <button class="step-btn" type="button" data-target="tempo_bpm" data-step="-5">▼</button>
+                  </div>
+                </div>
+              </div>
+              <div class="setting-field">
+                <div class="label">Key</div>
+                <select id="key" name="key">
+                  <option>C</option><option>C#</option><option>Db</option><option>D</option><option>D#</option><option>Eb</option>
+                  <option>E</option><option>F</option><option>F#</option><option>Gb</option><option>G</option><option>G#</option>
+                  <option>Ab</option><option>A</option><option>A#</option><option>Bb</option><option>B</option>
+                </select>
+              </div>
+              <div class="setting-field">
+                <div class="label">Mode</div>
+                <select id="mode" name="mode">
+                  <option>major</option><option>minor</option><option>chromatic</option><option>major7</option><option>minor7</option><option>major_pentatonic</option><option>minor_pentatonic</option><option>dorian</option><option>phrygian</option>
+                  <option>lydian</option><option>mixolydian</option><option>locrian</option>
+                </select>
+              </div>
+              <div class="setting-field">
+                <div class="label">Voicing</div>
+                <select id="voicing_mode" name="voicing_mode">
+                  <option value="closed">closed</option>
+                  <option value="open">open</option>
+                </select>
+              </div>
+            </div>
+            <div class="shift-grid">
+              <div class="shift-field">
+                <div class="label-row">
+                  <div class="label">Octave Shift</div>
+                  <div id="octaveUnit" class="unit-readout">0 OCT</div>
+                </div>
+                <div class="num-control">
+                  <input id="octave_shift" class="num-input" name="octave_shift" type="number" min="-3" max="3" step="1" value="0" />
+                  <div class="stepper">
+                    <button class="step-btn" type="button" data-target="octave_shift" data-step="1">▲</button>
+                    <button class="step-btn" type="button" data-target="octave_shift" data-step="-1">▼</button>
+                  </div>
+                </div>
+              </div>
+              <div class="shift-field">
+                <div class="label-row">
+                  <div class="label">Scale Degree Shift</div>
+                  <div id="degreeUnit" class="unit-readout">0 SD</div>
+                </div>
+                <div class="num-control">
+                  <input id="degree_shift" class="num-input" name="degree_shift" type="number" min="-14" max="14" step="1" value="0" />
+                  <div class="stepper">
+                    <button class="step-btn" type="button" data-target="degree_shift" data-step="1">▲</button>
+                    <button class="step-btn" type="button" data-target="degree_shift" data-step="-1">▼</button>
+                  </div>
+                </div>
+              </div>
+              <div class="shift-field">
+                <div class="label">Shift Controls</div>
+                <button id="resetShifts" class="btn-secondary reset-shifts-btn" type="button">Reset Shifts</button>
+              </div>
+            </div>
+
+            <div class="performance-wrap">
+              <div class="control-block">
+                <div class="bend-label">Bend Amount</div>
+                <div id="bendDial" class="dial" role="slider" aria-label="Bend Amount" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                  <div class="dial-inner"></div>
+                </div>
+                <div id="bendValue" class="bend-value">BEND OFF</div>
+                <input id="bend_amount" name="bend_amount" type="hidden" value="0" />
+              </div>
+              <div class="control-block">
+                <div class="bend-label">Ambience</div>
+                <button id="ambienceToggle" class="btn-secondary ambience-video-btn" type="button" aria-label="Ambience toggle" title="Ambience">
+                  <video id="ambienceToggleVideo" muted loop playsinline preload="auto">
+                    <source src="/flowing_grass_cropped_1.mp4" type="video/mp4" />
+                  </video>
+                </button>
+              </div>
+              <div class="control-block">
+                <div class="bend-label">Browser Synth</div>
+                <div
+                  id="synthDial"
+                  class="dial synth-dial"
+                  role="slider"
+                  aria-label="Browser Synth Volume"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="70"
+                  tabindex="0"
+                >
+                  <div class="dial-inner"></div>
+                </div>
+                <div id="synthValue" class="bend-value">70%</div>
+                <input id="synth_volume" type="hidden" value="70" />
+              </div>
+            </div>
+          </div>
+
+          <div class="label label-output">MIDI Output</div>
+          <div class="row">
+            <select id="port_name" name="port_name"></select>
+            <button id="refreshPorts" class="btn-secondary" type="button">Refresh Ports</button>
+            <button id="randomizeAll" class="btn-random-all" type="button">Randomize All</button>
+          </div>
+          <div class="loop-wrap">
+            <input id="loop_enabled" name="loop_enabled" type="checkbox" />
+            <label for="loop_enabled">Loop Live Send</label>
+            <div class="num-control loop-gap-control">
+              <input id="loop_gap_ms" class="num-input" name="loop_gap_ms" type="number" min="90" max="5000" step="1" value="120" />
+              <div class="stepper">
+                <button class="step-btn" type="button" data-target="loop_gap_ms" data-step="10">▲</button>
+                <button class="step-btn" type="button" data-target="loop_gap_ms" data-step="-10">▼</button>
+              </div>
+            </div>
+            <span>ms gap</span>
+          </div>
+
+          <div class="actions-row">
+            <button id="submit" class="btn-primary" type="submit">SEND MIDI</button>
+            <button id="saveMidi" class="btn-secondary" type="button">Save MIDI File</button>
+            <button id="stopMidi" class="btn-secondary" type="button">Stop MIDI</button>
+          </div>
+        </form>
+        <div id="status"></div>
+        <details class="mapping-info">
+          <summary>How Mapping Works</summary>
+          <div class="mapping-detail">
+            <p><strong>1) Split + phrasing</strong>: text is split into words and punctuation. Words stay close together, while commas/periods create bigger pauses.</p>
+            <p><strong>2) Word to chord</strong>: each word maps to a root note and chord shape. Syllables (and phonetic chunks) help decide how many notes are in that chord.</p>
+            <p><strong>3) Similar words, similar feel</strong>: the mapping uses character/phonetic patterns, so related words often land in a related pitch area.</p>
+            <p><strong>4) Arpeggiation behavior</strong>: short words are usually tighter (more block-like). Longer words are more likely to roll/arpeggiate, with wider timing spread.</p>
+            <p><strong>5) Musical snapping</strong>: raw notes are quantized to your selected key and mode, then octave shift and scale-degree shift are applied.</p>
+            <p><strong>6) Human timing</strong>: note timing is slightly varied so attacks are not perfectly robotic. Phrase rubato adds subtle speed-up/slow-down.</p>
+            <p><strong>7) Dynamics + bend</strong>: velocity follows stress/position in phrase, and Bend adds optional pitch movement for extra expression.</p>
+          </div>
+        </details>
+      </div>
+      <aside class="notes-flyout">
+      <details class="notes-panel" open>
+        <summary class="notes-title">INCOMING NOTES</summary>
+        <div class="notes-body">
+          <div class="notes-header">
+            <div class="unit-readout">Live Monitor</div>
+            <div class="notes-actions">
+              <button id="clearNotes" class="btn-secondary notes-clear" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="notesMeta" class="notes-meta">Waiting for MIDI...</div>
+          <div id="noteFeed" class="note-feed"></div>
+        </div>
+      </details>
+      </aside>
+    </div>
+
+    <script>
+      const form = document.getElementById('form');
+      const statusEl = document.getElementById('status');
+      const button = document.getElementById('submit');
+      const portSelect = document.getElementById('port_name');
+      const refreshPortsBtn = document.getElementById('refreshPorts');
+      const randomizeAllBtn = document.getElementById('randomizeAll');
+      const randomizeTextBtn = document.getElementById('randomizeText');
+      const lockTextBtn = document.getElementById('lockText');
+      const ambienceToggleBtn = document.getElementById('ambienceToggle');
+      const undoStateBtn = document.getElementById('undoState');
+      const saveMidiBtn = document.getElementById('saveMidi');
+      const stopMidiBtn = document.getElementById('stopMidi');
+      const noteFeedEl = document.getElementById('noteFeed');
+      const notesMetaEl = document.getElementById('notesMeta');
+      const clearNotesBtn = document.getElementById('clearNotes');
+      const notesPanel = document.querySelector('.notes-panel');
+      const notesSummary = notesPanel ? notesPanel.querySelector('summary') : null;
+      const synthDial = document.getElementById('synthDial');
+      const synthValue = document.getElementById('synthValue');
+      const synthVolumeInput = document.getElementById('synth_volume');
+      const textArea = document.getElementById('text');
+      const tempoInput = document.getElementById('tempo_bpm');
+      const keySelect = document.getElementById('key');
+      const modeSelect = document.getElementById('mode');
+      const voicingSelect = document.getElementById('voicing_mode');
+      const octaveShiftInput = document.getElementById('octave_shift');
+      const degreeShiftInput = document.getElementById('degree_shift');
+      const octaveUnit = document.getElementById('octaveUnit');
+      const degreeUnit = document.getElementById('degreeUnit');
+      const resetShiftsBtn = document.getElementById('resetShifts');
+      const bendInput = document.getElementById('bend_amount');
+      const bendDial = document.getElementById('bendDial');
+      const bendValue = document.getElementById('bendValue');
+      const stepButtons = document.querySelectorAll('.step-btn');
+      const loopEnabledInput = document.getElementById('loop_enabled');
+      const loopGapInput = document.getElementById('loop_gap_ms');
+      const authEmailInput = document.getElementById('authEmail');
+      const authPasswordInput = document.getElementById('authPassword');
+      const authRegisterBtn = document.getElementById('authRegister');
+      const authLoginBtn = document.getElementById('authLogin');
+      const authLogoutBtn = document.getElementById('authLogout');
+      const stripeCheckoutBtn = document.getElementById('stripeCheckout');
+      const patreonConnectBtn = document.getElementById('patreonConnect');
+      const billingManageBtn = document.getElementById('billingManage');
+      const accessStatusEl = document.getElementById('accessStatus');
+      const uiClickAudio = new Audio('/ui_click.wav?v=20260304-082617');
+      uiClickAudio.preload = 'auto';
+      const ambienceAudio = new Audio('/ambience.wav');
+      ambienceAudio.loop = true;
+      ambienceAudio.preload = 'auto';
+      ambienceAudio.volume = 1.0;
+      const ambienceBgVideo = document.getElementById('ambienceBgVideo');
+      const ambienceToggleVideo = document.getElementById('ambienceToggleVideo');
+      const lockOnAudio = new Audio('/lock_sound.wav');
+      const lockOffAudio = new Audio('/unlock_sound.wav');
+      lockOnAudio.preload = 'auto';
+      lockOffAudio.preload = 'auto';
+      let isSending = false;
+      let noteAfterId = 0;
+      let liveNotesBootstrapped = false;
+      let synthVolume = 70;
+      let textLocked = false;
+      let suppressHistory = false;
+      const stateHistory = [];
+      let lastStateSerialized = '';
+      let historyTimer = null;
+      let audioCtx = null;
+      let synthVerbBus = null;
+      let synthOutputBus = null;
+      let ambienceOn = false;
+      let ambienceSourceNode = null;
+      let ambienceGainNode = null;
+      const AMBIENCE_TARGET_GAIN = 0.03;
+      const AMBIENCE_FADE_SEC = 0.75;
+      let ambiencePauseTimer = null;
+      let voiceCounter = 0;
+      const activeVoices = new Map();
+      const MAX_BROWSER_VOICES = 32;
+      let currentAccount = { logged_in: false, paid_access: false };
+
+      function setPaidUiState() {
+        const paid = !!currentAccount.paid_access;
+        button.disabled = !paid;
+        saveMidiBtn.disabled = !paid;
+        stopMidiBtn.disabled = !paid;
+      }
+
+      function setAccessStatus(text) {
+        accessStatusEl.textContent = text;
+      }
+
+      async function apiFormPost(url, bodyObj = {}) {
+        const data = new FormData();
+        Object.entries(bodyObj).forEach(([k, v]) => data.append(k, String(v ?? '')));
+        const res = await fetch(url, { method: 'POST', body: data });
+        let payload = {};
+        try {
+          payload = await res.json();
+        } catch (_) {
+          payload = {};
+        }
+        if (!res.ok) {
+          const msg = payload.detail || payload.error || `Request failed (${res.status})`;
+          throw new Error(msg);
+        }
+        return payload;
+      }
+
+      async function refreshAccessState() {
+        try {
+          const res = await fetch('/api/auth/me');
+          const payload = await res.json();
+          currentAccount = payload.user || { logged_in: false, paid_access: false };
+          if (!currentAccount.logged_in) {
+            setAccessStatus('Not logged in. Register/login, then pay via Stripe or connect Patreon.');
+          } else if (!currentAccount.paid_access) {
+            setAccessStatus(`Logged in as ${currentAccount.email}. No paid access yet.`);
+          } else {
+            const src = currentAccount.entitlement_source || 'paid';
+            setAccessStatus(`Paid access active (${src}) as ${currentAccount.email}.`);
+          }
+        } catch (_) {
+          currentAccount = { logged_in: false, paid_access: false };
+          setAccessStatus('Could not load account status.');
+        }
+        setPaidUiState();
+      }
+
+      function ensureAudioContext() {
+        if (!audioCtx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return null;
+          audioCtx = new Ctx();
+          const master = audioCtx.createGain();
+          const limiter = audioCtx.createDynamicsCompressor();
+          master.gain.value = 1.2;
+          limiter.threshold.value = -12;
+          limiter.knee.value = 18;
+          limiter.ratio.value = 10;
+          limiter.attack.value = 0.003;
+          limiter.release.value = 0.14;
+          master.connect(limiter);
+          limiter.connect(audioCtx.destination);
+
+          const dryIn = audioCtx.createGain();
+          dryIn.gain.value = 1.0;
+          dryIn.connect(master);
+
+          const input = audioCtx.createGain();
+          const delay = audioCtx.createDelay(0.6);
+          const fb = audioCtx.createGain();
+          const wet = audioCtx.createGain();
+          delay.delayTime.value = 0.11;
+          fb.gain.value = 0.34;
+          wet.gain.value = 0.42;
+          input.connect(delay);
+          delay.connect(fb);
+          fb.connect(delay);
+          delay.connect(wet);
+          wet.connect(master);
+          synthVerbBus = { input, dryIn };
+          synthOutputBus = { master, limiter };
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+        return audioCtx;
+      }
+
+      function midiToHz(note) {
+        return 440 * Math.pow(2, (Number(note) - 69) / 12);
+      }
+
+      function prefersFlatsForKey(key) {
+        const k = String(key || '').trim();
+        return ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'].includes(k);
+      }
+
+      function formatNoteNameForKey(note, key) {
+        const n = Number(note);
+        if (!Number.isFinite(n)) return '';
+        const sharpNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const flatNames  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+        const pc = ((Math.round(n) % 12) + 12) % 12;
+        const octave = Math.floor(Math.round(n) / 12) - 1;
+        const names = prefersFlatsForKey(key) ? flatNames : sharpNames;
+        return `${names[pc]}${octave}`;
+      }
+
+      function playUiClickSound() {
+        try {
+          const a = uiClickAudio.cloneNode();
+          a.volume = 0.32;
+          void a.play();
+        } catch (_) {
+          // ignore playback failures
+        }
+      }
+
+      function updateTextLockUi() {
+        lockTextBtn.setAttribute('aria-pressed', textLocked ? 'true' : 'false');
+        lockTextBtn.setAttribute('aria-label', textLocked ? 'Text locked' : 'Text unlocked');
+        lockTextBtn.title = textLocked ? 'Text locked' : 'Text unlocked';
+        lockTextBtn.classList.toggle('btn-toggle-active', textLocked);
+        lockTextBtn.classList.toggle('unlocked', !textLocked);
+      }
+
+      function updateAmbienceUi() {
+        ambienceToggleBtn.classList.toggle('btn-toggle-active', ambienceOn);
+      }
+
+      function setAmbienceButtonVisual(on) {
+        if (!ambienceToggleVideo) return;
+        if (on) {
+          void ambienceToggleVideo.play().catch(() => {});
+        } else {
+          // Keep a non-black preview frame visible when paused.
+          if (Number.isFinite(ambienceToggleVideo.duration) && ambienceToggleVideo.duration > 1.2) {
+            ambienceToggleVideo.currentTime = Math.min(1.2, ambienceToggleVideo.duration - 0.05);
+          } else {
+            ambienceToggleVideo.currentTime = 0.8;
+          }
+          ambienceToggleVideo.pause();
+        }
+      }
+
+      if (ambienceToggleVideo) {
+        ambienceToggleVideo.addEventListener('loadedmetadata', () => {
+          if (!ambienceOn) {
+            try {
+              ambienceToggleVideo.currentTime = Math.min(1.2, (ambienceToggleVideo.duration || 1.2) - 0.05);
+            } catch (_) {
+              // ignore seek failures
+            }
+          }
+        });
+      }
+
+      function ensureAmbienceAudioChain() {
+        const ctx = ensureAudioContext();
+        if (!ctx) return null;
+        if (!ambienceGainNode) {
+          ambienceGainNode = ctx.createGain();
+          ambienceGainNode.gain.value = 0;
+          ambienceGainNode.connect(ctx.destination);
+        }
+        if (!ambienceSourceNode) {
+          ambienceSourceNode = ctx.createMediaElementSource(ambienceAudio);
+          ambienceSourceNode.connect(ambienceGainNode);
+        }
+        return ctx;
+      }
+
+      function setAmbienceVisual(on) {
+        setAmbienceButtonVisual(on);
+        if (!ambienceBgVideo) return;
+        if (on) {
+          ambienceBgVideo.currentTime = ambienceBgVideo.currentTime || 0;
+          void ambienceBgVideo.play().catch(() => {});
+          document.body.classList.add('ambience-active');
+          return;
+        }
+        document.body.classList.remove('ambience-active');
+        setTimeout(() => {
+          if (!ambienceOn) ambienceBgVideo.pause();
+        }, 950);
+      }
+
+      async function setAmbienceState(nextOn) {
+        const ctx = ensureAmbienceAudioChain();
+        if (!ctx || !ambienceGainNode) throw new Error('No audio context');
+        clearTimeout(ambiencePauseTimer);
+        const now = ctx.currentTime;
+        const g = ambienceGainNode.gain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(g.value, now);
+
+        if (nextOn) {
+          await ambienceAudio.play();
+          setAmbienceVisual(true);
+          g.linearRampToValueAtTime(AMBIENCE_TARGET_GAIN, now + AMBIENCE_FADE_SEC);
+          return;
+        }
+        g.linearRampToValueAtTime(0, now + AMBIENCE_FADE_SEC);
+        setAmbienceVisual(false);
+        ambiencePauseTimer = setTimeout(() => {
+          if (!ambienceOn) ambienceAudio.pause();
+        }, Math.round((AMBIENCE_FADE_SEC + 0.08) * 1000));
+      }
+
+      function getUiState() {
+        return {
+          text: textArea.value || '',
+          tempo_bpm: tempoInput.value || '60',
+          key: keySelect.value || 'C',
+          mode: modeSelect.value || 'major',
+          voicing_mode: voicingSelect.value || 'closed',
+          octave_shift: octaveShiftInput.value || '0',
+          degree_shift: degreeShiftInput.value || '0',
+          bend_amount: bendInput.value || '0',
+          synth_volume: synthVolumeInput.value || '70',
+          port_name: portSelect.value || '',
+          loop_enabled: !!loopEnabledInput.checked,
+          loop_gap_ms: loopGapInput.value || '120',
+        };
+      }
+
+      function applyUiState(state) {
+        suppressHistory = true;
+        textArea.value = state.text ?? '';
+        tempoInput.value = state.tempo_bpm ?? '60';
+        keySelect.value = state.key ?? 'C';
+        modeSelect.value = state.mode ?? 'major';
+        voicingSelect.value = state.voicing_mode ?? 'closed';
+        octaveShiftInput.value = state.octave_shift ?? '0';
+        degreeShiftInput.value = state.degree_shift ?? '0';
+        setBend(state.bend_amount ?? 0);
+        setSynthVolume(state.synth_volume ?? 70);
+        if (state.port_name) portSelect.value = state.port_name;
+        loopEnabledInput.checked = !!state.loop_enabled;
+        loopGapInput.value = state.loop_gap_ms ?? '120';
+        updateShiftUnits();
+        suppressHistory = false;
+        if (isSending) pushLiveSettings();
+      }
+
+      function recordHistoryState(force = false) {
+        if (suppressHistory) return;
+        const state = getUiState();
+        const serialized = JSON.stringify(state);
+        if (!force && serialized === lastStateSerialized) return;
+        stateHistory.push(state);
+        if (stateHistory.length > 80) stateHistory.shift();
+        lastStateSerialized = serialized;
+        undoStateBtn.disabled = stateHistory.length <= 1;
+      }
+
+      function queueHistoryRecord() {
+        if (suppressHistory) return;
+        clearTimeout(historyTimer);
+        historyTimer = setTimeout(() => recordHistoryState(false), 240);
+      }
+
+      function stopAllBrowserVoices() {
+        activeVoices.forEach((voice) => {
+          try {
+            voice.gain.gain.cancelScheduledValues(0);
+            voice.gain.gain.setValueAtTime(0, audioCtx ? audioCtx.currentTime : 0);
+            voice.osc.stop();
+          } catch (_) {
+            // ignore stale voices
+          }
+        });
+        activeVoices.clear();
+      }
+
+      function updateSynthUi() {
+        const v = Math.round(Math.max(0, Math.min(100, Number(synthVolume) || 0)));
+        synthVolume = v;
+        synthVolumeInput.value = String(v);
+        synthDial.style.setProperty('--value', v);
+        synthDial.setAttribute('aria-valuenow', String(v));
+        const isOn = v > 0;
+        synthValue.textContent = isOn ? `${v}%` : 'OFF';
+      }
+
+      function setSynthVolume(v) {
+        synthVolume = Math.round(Math.max(0, Math.min(100, Number(v) || 0)));
+        updateSynthUi();
+        if (synthVolume <= 0) {
+          stopAllBrowserVoices();
+        } else {
+          ensureAudioContext();
+        }
+      }
+
+      function playBrowserNote(note, velocity = 100, startOffsetSec = 0) {
+        if (synthVolume <= 0) return;
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
+        const n = Number(note);
+        if (!Number.isFinite(n)) return;
+
+        const now = ctx.currentTime;
+        const startAt = now + Math.max(0, Number(startOffsetSec) || 0);
+        const attackSec = 0.005;
+        const decaySec = 0.3;
+        const sustainLevel = 0.0;
+        const releaseSec = 0.005;
+        const velNorm = Math.max(0, Math.min(1, (Number(velocity) || 100) / 127));
+        const velCurve = Math.pow(velNorm, 1.35);
+        const volNorm = synthVolume / 100;
+        const level = Math.max(0.00005, Math.min(0.09, velCurve * 0.09 * volNorm));
+
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(midiToHz(n), startAt);
+        osc.detune.setValueAtTime(0, startAt);
+
+        const bendAmt = Math.max(0, Math.min(100, Number(bendInput.value || 0)));
+        if (bendAmt > 0) {
+          // Mirror the MIDI bend feel with a tiny pitch envelope in cents.
+          const maxCents = Math.max(2, bendAmt * 0.45); // 0..~45c
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          const startCents = dir * maxCents * (0.42 + Math.random() * 0.22);
+          const midCents = -dir * maxCents * (0.18 + Math.random() * 0.16);
+          const envWindowSec = attackSec + decaySec;
+          const t1 = startAt + envWindowSec * 0.10;
+          const t2 = startAt + envWindowSec * 0.44;
+          const t3 = startAt + envWindowSec * 0.84;
+          osc.detune.linearRampToValueAtTime(startCents, t1);
+          osc.detune.linearRampToValueAtTime(midCents, t2);
+          osc.detune.linearRampToValueAtTime(0, t3);
+          osc.detune.linearRampToValueAtTime(0, startAt + envWindowSec + releaseSec);
+        }
+
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, startAt);
+        gain.gain.linearRampToValueAtTime(level, startAt + attackSec);
+        gain.gain.linearRampToValueAtTime(level * sustainLevel, startAt + attackSec + decaySec);
+        gain.gain.setValueAtTime(level * sustainLevel, startAt + attackSec + decaySec);
+        gain.gain.linearRampToValueAtTime(0, startAt + attackSec + decaySec + releaseSec);
+
+        osc.connect(gain);
+        if (synthVerbBus && synthVerbBus.dryIn) {
+          gain.connect(synthVerbBus.dryIn);
+        }
+        if (synthVerbBus && synthVerbBus.input) {
+          gain.connect(synthVerbBus.input);
+        }
+
+        const id = ++voiceCounter;
+        activeVoices.set(id, { osc, gain, started: startAt });
+
+        osc.start(startAt);
+        osc.stop(startAt + attackSec + decaySec + releaseSec + 0.01);
+        osc.onended = () => {
+          activeVoices.delete(id);
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch (_) {
+            // disconnected already
+          }
+        };
+
+        if (activeVoices.size > MAX_BROWSER_VOICES) {
+          const oldestId = activeVoices.keys().next().value;
+          const oldest = activeVoices.get(oldestId);
+          if (oldest) {
+            try {
+              oldest.gain.gain.setValueAtTime(0, ctx.currentTime);
+              oldest.osc.stop(ctx.currentTime + 0.005);
+            } catch (_) {
+              // ignore
+            }
+          }
+        }
+      }
+
+      async function loadPorts() {
+        statusEl.textContent = 'Loading MIDI ports...';
+        try {
+          const res = await fetch('/api/ports');
+          if (!res.ok) throw new Error('Could not load MIDI ports.');
+          const data = await res.json();
+          const ports = data.ports || [];
+          portSelect.innerHTML = '';
+          if (!ports.length) {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'No MIDI ports found';
+            portSelect.appendChild(opt);
+            statusEl.textContent = 'No MIDI output ports found.';
+            return;
+          }
+          for (const port of ports) {
+            const opt = document.createElement('option');
+            opt.value = port;
+            opt.textContent = port;
+            portSelect.appendChild(opt);
+          }
+          statusEl.textContent = `Loaded ${ports.length} MIDI port(s).`;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Could not load MIDI ports.';
+        }
+      }
+
+      authRegisterBtn.addEventListener('click', async () => {
+        try {
+          const email = (authEmailInput.value || '').trim();
+          const password = authPasswordInput.value || '';
+          if (!email || !password) throw new Error('Enter email and password.');
+          await apiFormPost('/api/auth/register', { email, password });
+          authPasswordInput.value = '';
+          await refreshAccessState();
+          statusEl.textContent = 'Registered and logged in.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Register failed.';
+        }
+      });
+
+      authLoginBtn.addEventListener('click', async () => {
+        try {
+          const email = (authEmailInput.value || '').trim();
+          const password = authPasswordInput.value || '';
+          if (!email || !password) throw new Error('Enter email and password.');
+          await apiFormPost('/api/auth/login', { email, password });
+          authPasswordInput.value = '';
+          await refreshAccessState();
+          statusEl.textContent = 'Logged in.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Login failed.';
+        }
+      });
+
+      authLogoutBtn.addEventListener('click', async () => {
+        try {
+          await apiFormPost('/api/auth/logout');
+          await refreshAccessState();
+          statusEl.textContent = 'Logged out.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Logout failed.';
+        }
+      });
+
+      stripeCheckoutBtn.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/billing/stripe/checkout', { method: 'POST' });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload.detail || 'Stripe checkout failed.');
+          if (!payload.checkout_url) throw new Error('Missing Stripe checkout URL.');
+          window.location.href = payload.checkout_url;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Stripe checkout failed.';
+        }
+      });
+
+      billingManageBtn.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/billing/stripe/portal', { method: 'POST' });
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload.detail || 'Could not open billing portal.');
+          if (!payload.portal_url) throw new Error('Missing billing portal URL.');
+          window.location.href = payload.portal_url;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Could not open billing portal.';
+        }
+      });
+
+      patreonConnectBtn.addEventListener('click', async () => {
+        try {
+          const res = await fetch('/api/billing/patreon/connect');
+          const payload = await res.json();
+          if (!res.ok) throw new Error(payload.detail || 'Patreon connect failed.');
+          if (!payload.auth_url) throw new Error('Missing Patreon auth URL.');
+          window.location.href = payload.auth_url;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Patreon connect failed.';
+        }
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        recordHistoryState(false);
+        button.disabled = true;
+        statusEl.textContent = 'Sending MIDI...';
+        isSending = true;
+        notesMetaEl.textContent = 'Listening...';
+
+        try {
+          const data = new FormData(form);
+          const res = await fetch('/api/send-live', { method: 'POST', body: data });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: 'Request failed.' }));
+            throw new Error(err.detail || 'Request failed.');
+          }
+          const dataJson = await res.json();
+          const loopInfo = dataJson.looped ? ` (loops: ${dataJson.loops_completed})` : '';
+          statusEl.textContent = `${dataJson.status} on ${dataJson.port}${loopInfo}`;
+        } catch (err) {
+          statusEl.textContent = err.message;
+          if ((err.message || '').toLowerCase().includes('paid access required') || (err.message || '').toLowerCase().includes('login required')) {
+            await refreshAccessState();
+          }
+        } finally {
+          isSending = false;
+          button.disabled = false;
+          setPaidUiState();
+        }
+      });
+
+      saveMidiBtn.addEventListener('click', async () => {
+        saveMidiBtn.disabled = true;
+        statusEl.textContent = 'Saving MIDI file...';
+        try {
+          const data = new FormData(form);
+          const res = await fetch('/api/save-midi', { method: 'POST', body: data });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: 'Save failed.' }));
+            throw new Error(err.detail || 'Save failed.');
+          }
+          const blob = await res.blob();
+          const cd = res.headers.get('content-disposition') || '';
+          const match = cd.match(/filename="?([^";]+)"?/i);
+          const filename = match ? match[1] : 'text_to_midi.mid';
+
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+
+          statusEl.textContent = `Saved ${filename}`;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Save failed.';
+          if ((err.message || '').toLowerCase().includes('paid access required') || (err.message || '').toLowerCase().includes('login required')) {
+            await refreshAccessState();
+          }
+        } finally {
+          saveMidiBtn.disabled = false;
+          setPaidUiState();
+        }
+      });
+
+      refreshPortsBtn.addEventListener('click', loadPorts);
+      randomizeAllBtn.addEventListener('click', async () => {
+        recordHistoryState(false);
+        statusEl.textContent = 'Randomizing...';
+        try {
+          const res = await fetch('/api/randomize');
+          if (!res.ok) throw new Error('Randomize failed.');
+          const payload = await res.json();
+          if (!textLocked) {
+            textArea.value = payload.text || '';
+          }
+          tempoInput.value = payload.tempo_bpm ?? 120;
+          keySelect.value = payload.key || 'C';
+          modeSelect.value = payload.mode || 'major';
+          voicingSelect.value = Math.random() < 0.5 ? 'closed' : 'open';
+          octaveShiftInput.value = String(Math.floor(Math.random() * 3) - 1);
+          degreeShiftInput.value = String(Math.floor(Math.random() * 9) - 4);
+          updateShiftUnits();
+          setBend(Math.floor(Math.random() * 56));
+          if (isSending) await pushLiveSettings();
+
+          if (payload.port_name) {
+            const hasPort = Array.from(portSelect.options).some((o) => o.value === payload.port_name);
+            if (!hasPort) {
+              await loadPorts();
+            }
+            portSelect.value = payload.port_name;
+          }
+          statusEl.textContent = textLocked ? 'Randomized settings (text locked).' : 'Randomized settings and text.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Randomize failed.';
+        }
+      });
+
+      randomizeTextBtn.addEventListener('click', async () => {
+        recordHistoryState(false);
+        statusEl.textContent = 'Randomizing text...';
+        try {
+          const res = await fetch('/api/randomize-text');
+          if (!res.ok) throw new Error('Randomize text failed.');
+          const payload = await res.json();
+          textArea.value = payload.text || '';
+          if (isSending) await pushLiveSettings();
+          statusEl.textContent = 'Randomized text.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Randomize text failed.';
+        }
+      });
+      lockTextBtn.addEventListener('click', () => {
+        textLocked = !textLocked;
+        updateTextLockUi();
+        statusEl.textContent = textLocked ? 'Text lock enabled.' : 'Text lock disabled.';
+        try {
+          const a = (textLocked ? lockOnAudio : lockOffAudio).cloneNode();
+          a.volume = 0.38;
+          void a.play();
+        } catch (_) {
+          // ignore playback failures
+        }
+      });
+      ambienceToggleBtn.addEventListener('click', async () => {
+        ambienceOn = !ambienceOn;
+        updateAmbienceUi();
+        try {
+          await setAmbienceState(ambienceOn);
+          statusEl.textContent = ambienceOn ? 'Ambience enabled.' : 'Ambience disabled.';
+        } catch (_) {
+          ambienceOn = false;
+          updateAmbienceUi();
+          setAmbienceVisual(false);
+          statusEl.textContent = 'Could not start ambience audio.';
+        }
+      });
+      resetShiftsBtn.addEventListener('click', () => {
+        recordHistoryState(false);
+        octaveShiftInput.value = '0';
+        degreeShiftInput.value = '0';
+        updateShiftUnits();
+        pushLiveSettings();
+      });
+      async function requestStop(silent = false) {
+        try {
+          const res = await fetch('/api/stop-live', { method: 'POST' });
+          const payload = await res.json().catch(() => ({ status: 'Stop requested.' }));
+          if (!silent) statusEl.textContent = payload.status || 'Stop requested.';
+        } catch (err) {
+          if (!silent) statusEl.textContent = err.message || 'Stop request failed.';
+        }
+      }
+
+      stopMidiBtn.addEventListener('click', async () => {
+        await requestStop(false);
+      });
+
+      undoStateBtn.addEventListener('click', () => {
+        if (stateHistory.length <= 1) {
+          statusEl.textContent = 'Nothing to undo.';
+          undoStateBtn.disabled = true;
+          return;
+        }
+        stateHistory.pop(); // remove current
+        const prev = stateHistory[stateHistory.length - 1];
+        applyUiState(prev);
+        lastStateSerialized = JSON.stringify(prev);
+        undoStateBtn.disabled = stateHistory.length <= 1;
+        statusEl.textContent = 'Restored previous text/settings.';
+      });
+
+      textArea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
+      });
+
+      function updateBendLabel() {
+        const v = Number(bendInput.value || 0);
+        bendValue.textContent = v === 0 ? 'OFF' : `BEND ${v}%`;
+      }
+
+      function setBend(v) {
+        const clamped = Math.round(Math.max(0, Math.min(100, Number(v) || 0)));
+        bendInput.value = String(clamped);
+        bendDial.style.setProperty('--value', clamped);
+        bendDial.setAttribute('aria-valuenow', String(clamped));
+        updateBendLabel();
+        if (isSending) {
+          pushLiveSettings();
+        }
+      }
+
+      function formatSignedUnit(value, unit) {
+        const n = Math.round(Number(value) || 0);
+        const sign = n > 0 ? '+' : '';
+        return `${sign}${n} ${unit}`;
+      }
+
+      function updateShiftUnits() {
+        octaveUnit.textContent = formatSignedUnit(octaveShiftInput.value, 'OCT');
+        degreeUnit.textContent = formatSignedUnit(degreeShiftInput.value, 'SD');
+      }
+
+      function appendNoteGroup(group) {
+        const row = document.createElement('div');
+        row.className = 'note-row';
+        const notes = group.map((g) => g.name).join(' · ');
+        const token = (group.find((g) => g.token)?.token || '').trim();
+        const unitText = (group.find((g) => (g.units || '').length)?.units || '').trim();
+        const mapText = token
+          ? `${token}${unitText ? ` [${unitText}]` : ''}`
+          : (unitText ? `[${unitText}]` : '');
+        row.innerHTML = `<span class="note-name">${notes}</span>${mapText ? `<span class="unit-readout">← ${mapText}</span>` : ''}`;
+        noteFeedEl.appendChild(row);
+        if (noteFeedEl.childElementCount > 240) {
+          noteFeedEl.removeChild(noteFeedEl.firstChild);
+        }
+        noteFeedEl.scrollTop = noteFeedEl.scrollHeight;
+      }
+
+      async function pollLiveNotes() {
+        if (!liveNotesBootstrapped) return;
+        try {
+          const res = await fetch(`/api/live-notes?after=${noteAfterId}`);
+          if (!res.ok) return;
+          const payload = await res.json();
+          const events = payload.events || [];
+          if (events.length) {
+            const groups = [];
+            let current = [];
+            let currentToken = '';
+            let currentChordSize = 0;
+            let currentStartTs = null;
+            let prevSynthTs = null;
+            let synthClusterOffset = 0;
+            for (const ev of events) {
+              const ts = Number(ev.ts || 0);
+              const name = formatNoteNameForKey(ev.note, keySelect.value) || String(ev.name || '');
+              const token = String(ev.source_token || '');
+              const units = Array.isArray(ev.source_units) ? ev.source_units.join('-') : '';
+              const noteIndex = Number.isFinite(Number(ev.note_index)) ? Number(ev.note_index) : -1;
+              const chordSize = Number.isFinite(Number(ev.chord_size)) ? Number(ev.chord_size) : 0;
+              const note = Number(ev.note);
+              const velocity = Number(ev.velocity || 100);
+              if (!name) continue;
+              if (synthVolume > 0 && Number.isFinite(note)) {
+                if (prevSynthTs === null) {
+                  synthClusterOffset = 0;
+                } else {
+                  const d = Math.max(0, ts - prevSynthTs);
+                  // Keep close-note microtiming (rolls/arp), reset on larger phrase gaps.
+                  if (d <= 0.09) {
+                    synthClusterOffset += d;
+                  } else {
+                    synthClusterOffset = 0;
+                  }
+                }
+                playBrowserNote(note, velocity, synthClusterOffset);
+                prevSynthTs = ts;
+              }
+              const item = { name, token, units };
+              // Word/chord-centric grouping:
+              // - Start a new row on note_index==0 (new chord),
+              // - Keep rolled/arpeggiated notes of that chord together,
+              // - Fall back to timing only when metadata is missing.
+              const startsNewChord = noteIndex === 0;
+              const sameToken = token && token === currentToken;
+              const sameChordSize = chordSize > 0 && chordSize === currentChordSize;
+              const withinFallbackWindow = currentStartTs !== null && Math.abs(ts - currentStartTs) <= 0.42;
+
+              if (!current.length) {
+                current = [item];
+                currentToken = token;
+                currentChordSize = chordSize;
+                currentStartTs = ts;
+                continue;
+              }
+
+              if (startsNewChord || (!sameToken && !withinFallbackWindow) || (!sameChordSize && chordSize > 0)) {
+                groups.push(current);
+                current = [item];
+                currentToken = token;
+                currentChordSize = chordSize;
+                currentStartTs = ts;
+              } else {
+                current.push(item);
+              }
+            }
+            if (current.length) groups.push(current);
+            for (const g of groups) appendNoteGroup(g);
+          }
+          noteAfterId = Number(payload.latest_id || noteAfterId);
+          notesMetaEl.textContent = payload.active
+            ? 'Streaming live notes...'
+            : (events.length ? 'Last send captured.' : 'Waiting for MIDI...');
+        } catch (_) {
+          // keep polling
+        }
+      }
+
+      async function primeLiveNotesCursor() {
+        noteFeedEl.innerHTML = '';
+        notesMetaEl.textContent = 'Waiting for MIDI...';
+        try {
+          const res = await fetch('/api/live-notes?after=0');
+          if (res.ok) {
+            const payload = await res.json();
+            noteAfterId = Number(payload.latest_id || 0);
+          }
+        } catch (_) {
+          // keep default cursor at 0 on network failure
+        } finally {
+          liveNotesBootstrapped = true;
+        }
+      }
+
+      async function clearNoteConsole() {
+        noteFeedEl.innerHTML = '';
+        try {
+          const res = await fetch('/api/live-notes?after=0');
+          const payload = await res.json();
+          noteAfterId = Number(payload.latest_id || noteAfterId);
+        } catch (_) {
+          // keep current cursor if request fails
+        }
+        notesMetaEl.textContent = 'Cleared. Waiting for new MIDI...';
+      }
+
+      function clampToInputRange(inputEl, nextValue) {
+        const min = inputEl.min !== '' ? Number(inputEl.min) : Number.NEGATIVE_INFINITY;
+        const max = inputEl.max !== '' ? Number(inputEl.max) : Number.POSITIVE_INFINITY;
+        return Math.max(min, Math.min(max, nextValue));
+      }
+
+      async function pushLiveSettings() {
+        if (!isSending) return;
+        const data = new FormData();
+        data.set('text', textArea.value || '');
+        data.set('tempo_bpm', tempoInput.value || '60');
+        data.set('key', keySelect.value || 'C');
+        data.set('mode', modeSelect.value || 'major');
+        data.set('voicing_mode', voicingSelect.value || 'closed');
+        data.set('port_name', portSelect.value || '');
+        data.set('bend_amount', bendInput.value || '0');
+        data.set('octave_shift', octaveShiftInput.value || '0');
+        data.set('degree_shift', degreeShiftInput.value || '0');
+        data.set('loop_enabled', loopEnabledInput.checked ? 'true' : 'false');
+        data.set('loop_gap_ms', loopGapInput.value || '0');
+        try {
+          await fetch('/api/update-live-settings', { method: 'POST', body: data });
+        } catch (_) {
+          // Non-fatal; next control change can retry.
+        }
+      }
+
+      let dialDragging = false;
+      let dialStartY = 0;
+      let dialStartVal = 0;
+      bendDial.addEventListener('mousedown', (e) => {
+        dialDragging = true;
+        dialStartY = e.clientY;
+        dialStartVal = Number(bendInput.value || 0);
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!dialDragging) return;
+        const delta = (dialStartY - e.clientY) * 0.6;
+        setBend(dialStartVal + delta);
+      });
+      window.addEventListener('mouseup', () => { dialDragging = false; });
+      bendDial.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 3 : -3;
+        setBend(Number(bendInput.value || 0) + delta);
+      });
+      bendDial.addEventListener('keydown', (e) => {
+        const cur = Number(bendInput.value || 0);
+        if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setBend(cur + 2); }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setBend(cur - 2); }
+      });
+      tempoInput.addEventListener('change', pushLiveSettings);
+      tempoInput.addEventListener('input', pushLiveSettings);
+      keySelect.addEventListener('change', pushLiveSettings);
+      modeSelect.addEventListener('change', pushLiveSettings);
+      voicingSelect.addEventListener('change', pushLiveSettings);
+      octaveShiftInput.addEventListener('change', pushLiveSettings);
+      degreeShiftInput.addEventListener('change', pushLiveSettings);
+      octaveShiftInput.addEventListener('input', () => { updateShiftUnits(); pushLiveSettings(); });
+      degreeShiftInput.addEventListener('input', () => { updateShiftUnits(); pushLiveSettings(); });
+      portSelect.addEventListener('change', pushLiveSettings);
+      loopEnabledInput.addEventListener('change', async () => {
+        await pushLiveSettings();
+        if (!loopEnabledInput.checked && isSending) {
+          await requestStop(true);
+          statusEl.textContent = 'Loop disabled. Stopping current MIDI send...';
+        }
+      });
+      loopGapInput.addEventListener('change', pushLiveSettings);
+      loopGapInput.addEventListener('input', pushLiveSettings);
+      [textArea, tempoInput, keySelect, modeSelect, voicingSelect, octaveShiftInput, degreeShiftInput, bendInput, synthVolumeInput, portSelect, loopEnabledInput, loopGapInput].forEach((el) => {
+        el.addEventListener('input', queueHistoryRecord);
+        el.addEventListener('change', queueHistoryRecord);
+      });
+      textArea.addEventListener('input', () => {
+        // Keep live loop editable without flooding; lightweight debounce.
+        clearTimeout(window.__textMidiUpdateTimer);
+        window.__textMidiUpdateTimer = setTimeout(() => { pushLiveSettings(); }, 220);
+      });
+      stepButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const targetId = btn.getAttribute('data-target');
+          const step = Number(btn.getAttribute('data-step') || 1);
+          const inputEl = document.getElementById(targetId);
+          if (!inputEl) return;
+          const current = Number(inputEl.value || 0);
+          const next = clampToInputRange(inputEl, current + step);
+          inputEl.value = String(next);
+          if (inputEl === octaveShiftInput || inputEl === degreeShiftInput) updateShiftUnits();
+          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+          inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      });
+      // UI button click SFX
+      document.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (btn === lockTextBtn) return;
+          playUiClickSound();
+        });
+        btn.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            if (btn === lockTextBtn) return;
+            playUiClickSound();
+          }
+        });
+      });
+      if (notesSummary) {
+        notesSummary.addEventListener('click', () => {
+          playUiClickSound();
+        });
+      }
+      clearNotesBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearNoteConsole();
+      });
+      let synthDragging = false;
+      let synthStartY = 0;
+      let synthStartVal = 0;
+      synthDial.addEventListener('mousedown', (e) => {
+        synthDragging = true;
+        synthStartY = e.clientY;
+        synthStartVal = Number(synthVolumeInput.value || 0);
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!synthDragging) return;
+        const delta = (synthStartY - e.clientY) * 0.6;
+        setSynthVolume(synthStartVal + delta);
+      });
+      window.addEventListener('mouseup', () => { synthDragging = false; });
+      synthDial.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 3 : -3;
+        setSynthVolume(Number(synthVolumeInput.value || 0) + delta);
+      });
+      synthDial.addEventListener('keydown', (e) => {
+        const cur = Number(synthVolumeInput.value || 0);
+        if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setSynthVolume(cur + 2); }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setSynthVolume(cur - 2); }
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setSynthVolume(cur > 0 ? 0 : 70);
+        }
+      });
+
+      setBend(0);
+      setSynthVolume(70);
+      updateTextLockUi();
+      updateAmbienceUi();
+      setAmbienceButtonVisual(false);
+      updateShiftUnits();
+      recordHistoryState(true);
+      refreshAccessState();
+      loadPorts();
+      primeLiveNotesCursor().finally(() => {
+        setInterval(pollLiveNotes, 90);
+      });
+      // Safety: if a previous loop got stuck, stop it when this page boots.
+      requestStop(true);
+      ['mousedown', 'keydown', 'touchstart'].forEach((evtName) => {
+        window.addEventListener(evtName, () => { ensureAudioContext(); }, { once: true, passive: true });
+      });
+
+      function requestStopKeepalive() {
+        try {
+          fetch('/api/stop-live', { method: 'POST', keepalive: true });
+        } catch (_) {
+          // best-effort only
+        }
+      }
+
+      window.addEventListener('beforeunload', () => {
+        stopAllBrowserVoices();
+        ambienceOn = false;
+        if (ambienceGainNode && audioCtx) {
+          const now = audioCtx.currentTime;
+          ambienceGainNode.gain.cancelScheduledValues(now);
+          ambienceGainNode.gain.setValueAtTime(0, now);
+        }
+        ambienceAudio.pause();
+        if (ambienceBgVideo) ambienceBgVideo.pause();
+        document.body.classList.remove('ambience-active');
+        requestStopKeepalive();
+        try {
+          navigator.sendBeacon('/api/stop-live');
+        } catch (_) {
+          // best-effort only
+        }
+      });
+      window.addEventListener('pagehide', () => {
+        stopAllBrowserVoices();
+        requestStopKeepalive();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          requestStopKeepalive();
+        }
+      });
+    </script>
+  </body>
+</html>
