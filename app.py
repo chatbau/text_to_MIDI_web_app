@@ -249,6 +249,7 @@ APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "").strip()
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "").strip()
+STRIPE_BILLING_MODE = os.getenv("STRIPE_BILLING_MODE", "one_time").strip().lower()
 
 PATREON_CLIENT_ID = os.getenv("PATREON_CLIENT_ID", "").strip()
 PATREON_CLIENT_SECRET = os.getenv("PATREON_CLIENT_SECRET", "").strip()
@@ -1046,8 +1047,9 @@ def stripe_checkout(request: Request):
             conn.execute("UPDATE users SET stripe_customer_id = ? WHERE id = ?", (customer_id, int(user["id"])))
             conn.commit()
 
+    checkout_mode = "subscription" if STRIPE_BILLING_MODE == "subscription" else "payment"
     session = stripe.checkout.Session.create(
-        mode="subscription",
+        mode=checkout_mode,
         customer=customer_id,
         line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
         success_url=f"{APP_BASE_URL}/?billing=success",
@@ -1065,6 +1067,8 @@ def stripe_portal(request: Request):
         raise HTTPException(status_code=401, detail="Login required.")
     if not stripe or not STRIPE_SECRET_KEY:
         raise HTTPException(status_code=500, detail="Stripe is not configured.")
+    if STRIPE_BILLING_MODE != "subscription":
+        raise HTTPException(status_code=400, detail="Billing portal is only available for subscription mode.")
     customer_id = (user["stripe_customer_id"] or "").strip()
     if not customer_id:
         raise HTTPException(status_code=400, detail="No Stripe customer for this account.")
@@ -1094,19 +1098,26 @@ async def stripe_webhook(request: Request, stripe_signature: str = Header(defaul
         with _db() as conn:
             user = conn.execute("SELECT * FROM users WHERE stripe_customer_id = ?", (customer_id,)).fetchone()
             if user:
-                if etype in {"checkout.session.completed", "customer.subscription.created", "customer.subscription.updated"}:
-                    status = str(data.get("status") or "").lower()
-                    paid = status in {"active", "trialing"} or etype == "checkout.session.completed"
-                    if paid:
+                if etype == "checkout.session.completed":
+                    payment_status = str(data.get("payment_status") or "").lower()
+                    if payment_status in {"paid", "no_payment_required"}:
                         conn.execute(
-                            "UPDATE users SET entitlement_source = 'stripe', stripe_subscription_id = ?, paid_until = NULL WHERE id = ?",
-                            (sub_id or user["stripe_subscription_id"], int(user["id"])),
+                            "UPDATE users SET entitlement_source = 'stripe', paid_until = NULL WHERE id = ?",
+                            (int(user["id"]),),
                         )
-                elif etype in {"customer.subscription.deleted", "customer.subscription.paused"}:
-                    conn.execute(
-                        "UPDATE users SET entitlement_source = 'none', stripe_subscription_id = NULL WHERE id = ?",
-                        (int(user["id"]),),
-                    )
+                elif STRIPE_BILLING_MODE == "subscription":
+                    if etype in {"customer.subscription.created", "customer.subscription.updated"}:
+                        status = str(data.get("status") or "").lower()
+                        if status in {"active", "trialing"}:
+                            conn.execute(
+                                "UPDATE users SET entitlement_source = 'stripe', stripe_subscription_id = ?, paid_until = NULL WHERE id = ?",
+                                (sub_id or user["stripe_subscription_id"], int(user["id"])),
+                            )
+                    elif etype in {"customer.subscription.deleted", "customer.subscription.paused"}:
+                        conn.execute(
+                            "UPDATE users SET entitlement_source = 'none', stripe_subscription_id = NULL WHERE id = ?",
+                            (int(user["id"]),),
+                        )
                 conn.commit()
     return {"ok": True}
 
