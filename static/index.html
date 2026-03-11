@@ -158,7 +158,7 @@
         border: 1px solid var(--line);
         background: #0d0d0d;
         padding: 10px;
-        margin: 8px 0 10px;
+        margin: 0;
       }
       .access-row {
         display: grid;
@@ -294,6 +294,64 @@
         width: 320px;
         z-index: 20;
       }
+      .access-flyout {
+        position: absolute;
+        top: 16px;
+        right: calc(100% + 8px);
+        width: 340px;
+        z-index: 20;
+      }
+      .access-flyout .access-panel {
+        border: 1px solid var(--line);
+        background: #0c0c0c;
+        padding: 10px;
+        box-shadow: 0 14px 36px rgba(0,0,0,.45);
+      }
+      .access-flyout .access-panel > summary {
+        cursor: pointer;
+        list-style: none;
+        position: absolute;
+        top: 10px;
+        right: -108px;
+        width: 98px;
+        border: 1px solid #7a5a2b;
+        background: #2b1d14;
+        color: var(--accent);
+        text-align: center;
+        padding: 10px 6px;
+        font-size: 10px;
+        letter-spacing: .5px;
+        line-height: 1.2;
+        border-radius: 0 2px 2px 0;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+      .access-flyout .access-panel > summary::-webkit-details-marker { display:none; }
+      .access-flyout .access-panel:not([open]) {
+        width: 104px;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+      .access-flyout .access-panel:not([open]) > summary {
+        position: relative;
+        top: 0;
+        right: 0;
+        width: 100%;
+        border-radius: 2px;
+      }
+      .access-flyout .access-panel:not([open]) .access-body { display:none; }
+      .access-flyout .access-panel[open] > summary {
+        border-radius: 2px;
+        right: 0;
+        top: -42px;
+        width: auto;
+        min-width: 138px;
+      }
+      .access-flyout .access-actions button {
+        min-height: 34px;
+      }
       .notes-flyout .notes-panel {
         box-shadow: 0 14px 36px rgba(0,0,0,.45);
       }
@@ -381,6 +439,24 @@
           top: 8px;
           width: min(320px, calc(100vw - 16px));
         }
+        .access-flyout {
+          position: fixed;
+          left: 8px;
+          right: auto;
+          top: 8px;
+          width: min(340px, calc(100vw - 16px));
+        }
+        .access-flyout .access-panel > summary {
+          right: auto;
+          left: 0;
+          top: 0;
+          border-radius: 2px;
+        }
+        .access-flyout .access-panel[open] > summary {
+          top: -42px;
+          left: 0;
+          right: auto;
+        }
         .notes-flyout .notes-panel > summary {
           left: auto;
           right: 0;
@@ -408,23 +484,6 @@
             <h1>text<span class="title-underscore">_</span>to<span class="title-underscore">_</span><span class="title-midi">MIDI</span></h1>
             <p>Type text, pick tempo/key/mode, choose a MIDI output port, then send live to your DAW.</p>
           </div>
-        </div>
-
-        <div class="access-bar">
-          <div class="label">Account Access</div>
-          <div class="access-row">
-            <input id="authEmail" type="email" placeholder="Email" autocomplete="email" />
-            <input id="authPassword" type="password" placeholder="Password (min 8 chars)" autocomplete="current-password" />
-          </div>
-          <div class="access-actions">
-            <button id="authRegister" class="btn-secondary" type="button">Register</button>
-            <button id="authLogin" class="btn-secondary" type="button">Login</button>
-            <button id="authLogout" class="btn-secondary" type="button">Logout</button>
-            <button id="stripeCheckout" class="btn-secondary" type="button">Pay with Stripe</button>
-            <button id="patreonConnect" class="btn-secondary" type="button">Connect Patreon</button>
-            <button id="billingManage" class="btn-secondary" type="button">Manage Billing</button>
-          </div>
-          <div id="accessStatus" class="access-status">Checking account status...</div>
         </div>
 
         <form id="form">
@@ -584,6 +643,28 @@
           </div>
         </details>
       </div>
+      <aside class="access-flyout">
+        <details class="access-panel">
+          <summary>Account Access</summary>
+          <div class="access-body">
+            <div class="access-bar">
+              <div class="access-row">
+                <input id="authEmail" type="email" placeholder="Email" autocomplete="email" />
+                <input id="authPassword" type="password" placeholder="Password (min 8 chars)" autocomplete="current-password" />
+              </div>
+              <div class="access-actions">
+                <button id="authRegister" class="btn-secondary" type="button">Register</button>
+                <button id="authLogin" class="btn-secondary" type="button">Login</button>
+                <button id="authLogout" class="btn-secondary" type="button">Logout</button>
+                <button id="stripeCheckout" class="btn-secondary" type="button">Pay with Stripe</button>
+                <button id="patreonConnect" class="btn-secondary" type="button">Connect Patreon</button>
+                <button id="billingManage" class="btn-secondary" type="button">Manage Billing</button>
+              </div>
+              <div id="accessStatus" class="access-status">Checking account status...</div>
+            </div>
+          </div>
+        </details>
+      </aside>
       <aside class="notes-flyout">
       <details class="notes-panel" open>
         <summary class="notes-title">INCOMING NOTES</summary>
