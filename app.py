@@ -1207,7 +1207,23 @@ def stripe_sync(request: Request):
         raise HTTPException(status_code=500, detail="Stripe is not configured.")
     customer_id = (user["stripe_customer_id"] or "").strip()
     if not customer_id:
-        return {"ok": False, "reason": "no_customer", "user": public_user_payload(user)}
+        # Fallback: recover Stripe customer by account email.
+        try:
+            customers = stripe.Customer.list(email=str(user["email"]), limit=10)
+            data = customers.get("data", []) if hasattr(customers, "get") else customers.data
+            for c in data or []:
+                cid = str(c.get("id") or "")
+                if cid:
+                    customer_id = cid
+                    break
+        except Exception:
+            customer_id = ""
+        if customer_id:
+            with _db() as conn:
+                conn.execute("UPDATE users SET stripe_customer_id = ? WHERE id = ?", (customer_id, int(user["id"])))
+                conn.commit()
+        else:
+            return {"ok": False, "reason": "no_customer", "user": public_user_payload(user)}
     try:
         sessions = stripe.checkout.Session.list(customer=customer_id, limit=20)
         data = sessions.get("data", []) if hasattr(sessions, "get") else sessions.data
