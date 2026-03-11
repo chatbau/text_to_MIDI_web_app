@@ -297,7 +297,7 @@
       .access-flyout {
         position: absolute;
         top: 16px;
-        right: calc(100% + 8px);
+        left: -104px;
         width: 340px;
         z-index: 20;
       }
@@ -644,7 +644,7 @@
         </details>
       </div>
       <aside class="access-flyout">
-        <details class="access-panel">
+        <details class="access-panel" open>
           <summary>Account Access</summary>
           <div class="access-body">
             <div class="access-bar">
@@ -700,6 +700,8 @@
       const clearNotesBtn = document.getElementById('clearNotes');
       const notesPanel = document.querySelector('.notes-panel');
       const notesSummary = notesPanel ? notesPanel.querySelector('summary') : null;
+      const accessPanel = document.querySelector('.access-panel');
+      const accessSummary = accessPanel ? accessPanel.querySelector('summary') : null;
       const synthDial = document.getElementById('synthDial');
       const synthValue = document.getElementById('synthValue');
       const synthVolumeInput = document.getElementById('synth_volume');
@@ -1686,6 +1688,11 @@
       });
       if (notesSummary) {
         notesSummary.addEventListener('click', () => {
+          playUiClickSound();
+        });
+      }
+      if (accessSummary) {
+        accessSummary.addEventListener('click', () => {
           playUiClickSound();
         });
       }
