@@ -32,7 +32,9 @@ except Exception:
 
 BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
-MAPPER_PATH = ROOT_DIR / "text_to_midi_live.py"
+MAPPER_PATH = BASE_DIR / "text_to_midi_live.py"
+if not MAPPER_PATH.exists():
+    MAPPER_PATH = ROOT_DIR / "text_to_midi_live.py"
 
 
 def load_mapper():
