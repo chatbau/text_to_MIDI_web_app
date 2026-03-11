@@ -423,8 +423,61 @@ def public_user_payload(user: sqlite3.Row | None) -> dict:
 def available_output_ports():
     try:
         return mapper.mido.get_output_names()
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Could not read MIDI ports: {exc}")
+    except Exception:
+        return []
+
+
+def emit_browser_only_events(events, stop_requested=None, note_callback=None):
+    """
+    Fallback for cloud environments where no MIDI output ports exist.
+    Emits note callbacks with timing so browser synth/live monitor still works.
+    """
+    for event in events:
+        if stop_requested and stop_requested():
+            return False
+        chord = event.get("chord", []) or []
+        advance = float(event.get("advance_sec", event.get("duration_sec", 0.0)) or 0.0)
+        velocity = int(event.get("velocity", 96))
+        source_token = str(event.get("source_token", ""))
+        source_units = event.get("source_units", []) or []
+        source_syllables = int(event.get("source_syllables", 0))
+        arp_steps = event.get("arpeggio_steps_sec", []) or []
+
+        if not chord:
+            if advance > 0:
+                if not wait_with_stop(STOP_EVENT, advance):
+                    return False
+            continue
+
+        elapsed = 0.0
+        chord_size = len(chord)
+        for i, note in enumerate(chord):
+            if note_callback:
+                try:
+                    note_callback(
+                        int(note),
+                        velocity,
+                        source_token,
+                        source_units,
+                        source_syllables,
+                        note_index=i,
+                        chord_size=chord_size,
+                    )
+                except TypeError:
+                    note_callback(int(note), velocity, source_token, source_units, source_syllables)
+
+            if i < chord_size - 1:
+                step = float(arp_steps[i] if i < len(arp_steps) else 0.0)
+                if step > 0:
+                    elapsed += step
+                    if not wait_with_stop(STOP_EVENT, step):
+                        return False
+
+        remaining = max(0.0, advance - elapsed)
+        if remaining > 0:
+            if not wait_with_stop(STOP_EVENT, remaining):
+                return False
+    return True
 
 
 init_auth_db()
@@ -1307,11 +1360,12 @@ def send_live(
                 variation_seed=base_seed,
             )
             ports = available_output_ports()
-            if not ports:
-                raise HTTPException(status_code=400, detail="No MIDI output ports found.")
-            chosen_port = state["port_name"] if state["port_name"] else ports[0]
-            if chosen_port not in ports:
-                chosen_port = ports[0]
+            chosen_port = ""
+            browser_only = not ports
+            if not browser_only:
+                chosen_port = state["port_name"] if state["port_name"] else ports[0]
+                if chosen_port not in ports:
+                    chosen_port = ports[0]
 
             def state_provider():
                 with STATE_LOCK:
@@ -1330,13 +1384,36 @@ def send_live(
                 }
 
             loop_count = 1
-            completed = mapper.send_live_reactive(
-                chosen_port,
-                base_events,
-                state_provider=state_provider,
-                stop_requested=STOP_EVENT.is_set,
-                note_callback=push_note_event,
-            )
+            if browser_only:
+                latest_state = state_provider()
+                preview_events = mapper.transform_events_pitch(
+                    base_events,
+                    key_root_pc=latest_state["key_root_pc"],
+                    mode_intervals=latest_state["mode_intervals"],
+                    octave_shift=latest_state["octave_shift"],
+                    degree_shift=latest_state["degree_shift"],
+                )
+                preview_events = mapper.apply_voicing_to_events(
+                    preview_events,
+                    voicing_mode=latest_state["voicing_mode"],
+                )
+                preview_events = mapper.add_pitch_bend_to_events(
+                    preview_events, bend_amount=int(latest_state["bend_amount"])
+                )
+                timed_preview_events = mapper.apply_tempo_to_events(
+                    preview_events, int(latest_state["tempo_bpm"])
+                )
+                completed = emit_browser_only_events(
+                    timed_preview_events, stop_requested=STOP_EVENT.is_set, note_callback=push_note_event
+                )
+            else:
+                completed = mapper.send_live_reactive(
+                    chosen_port,
+                    base_events,
+                    state_provider=state_provider,
+                    stop_requested=STOP_EVENT.is_set,
+                    note_callback=push_note_event,
+                )
             # Build a small preview of last-sent notes with latest settings.
             latest_state = state_provider()
             preview_events = mapper.transform_events_pitch(
@@ -1352,7 +1429,7 @@ def send_live(
             )
             preview_notes = [e for e in preview_events if e.get("chord")]
             last_note_names = [[mapper.midi_note_to_name(n) for n in e["chord"]] for e in preview_notes]
-            last_port = chosen_port
+            last_port = chosen_port if chosen_port else "Browser Synth Only"
 
             with STATE_LOCK:
                 state = dict(LIVE_STATE)
@@ -1388,24 +1465,30 @@ def send_live(
                     voicing_mode=normalize_voicing_mode(state.get("voicing_mode", "closed")),
                 )
                 ports = available_output_ports()
-                if not ports:
-                    raise HTTPException(status_code=400, detail="No MIDI output ports found.")
-                chosen_port = state["port_name"] if state["port_name"] else ports[0]
-                if chosen_port not in ports:
-                    chosen_port = ports[0]
+                chosen_port = ""
+                browser_only = not ports
+                if not browser_only:
+                    chosen_port = state["port_name"] if state["port_name"] else ports[0]
+                    if chosen_port not in ports:
+                        chosen_port = ports[0]
 
                 bent_events = mapper.add_pitch_bend_to_events(events, bend_amount=int(state["bend_amount"]))
                 timed_events = mapper.apply_tempo_to_events(bent_events, int(state["tempo_bpm"]))
 
                 loop_count += 1
-                completed = mapper.send_live(
-                    chosen_port,
-                    timed_events,
-                    stop_requested=STOP_EVENT.is_set,
-                    note_callback=push_note_event,
-                )
+                if browser_only:
+                    completed = emit_browser_only_events(
+                        timed_events, stop_requested=STOP_EVENT.is_set, note_callback=push_note_event
+                    )
+                else:
+                    completed = mapper.send_live(
+                        chosen_port,
+                        timed_events,
+                        stop_requested=STOP_EVENT.is_set,
+                        note_callback=push_note_event,
+                    )
                 last_note_names = [[mapper.midi_note_to_name(n) for n in e["chord"]] for e in events if e.get("chord")]
-                last_port = chosen_port
+                last_port = chosen_port if chosen_port else "Browser Synth Only"
                 if not completed:
                     break
                 if not bool(state["loop_enabled"]):
