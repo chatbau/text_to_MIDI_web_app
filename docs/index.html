@@ -779,9 +779,11 @@
       let midiAccess = null;
       let midiOutputMap = new Map();
       let playbackRunId = 0;
-      let scheduledTimers = [];
+      let scheduledTimers = new Set();
       let soundingNotes = new Set();
       let synthVolumeBeforeLite = 70;
+      let isShuttingDown = false;
+      let liveNotesIntervalId = null;
 
       function setAccessStatus(text) {
         accessStatusEl.textContent = text;
@@ -923,7 +925,7 @@
       function stopLocalPlayback() {
         playbackRunId += 1;
         for (const t of scheduledTimers) clearTimeout(t);
-        scheduledTimers = [];
+        scheduledTimers.clear();
         stopAllBrowserVoices();
         if (midiAccess) {
           for (const out of midiAccess.outputs.values()) {
@@ -942,10 +944,11 @@
 
       function scheduleTimer(ms, fn, runId) {
         const id = setTimeout(() => {
-          if (runId !== playbackRunId) return;
+          scheduledTimers.delete(id);
+          if (runId !== playbackRunId || isShuttingDown) return;
           fn();
         }, Math.max(0, Math.round(ms)));
-        scheduledTimers.push(id);
+        scheduledTimers.add(id);
       }
 
       function stableHash(str) {
@@ -1172,6 +1175,7 @@
       }
 
       function ensureAudioContext() {
+        if (isShuttingDown) return null;
         if (!audioCtx) {
           const Ctx = window.AudioContext || window.webkitAudioContext;
           if (!Ctx) return null;
@@ -1611,6 +1615,7 @@
 
       form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        if (isShuttingDown) return;
         recordHistoryState(false);
         button.disabled = true;
         statusEl.textContent = 'Sending MIDI...';
@@ -1986,6 +1991,7 @@
       let synthStartY = 0;
       let synthStartVal = 0;
       synthDial.addEventListener('mousedown', (e) => {
+        if (isShuttingDown) return;
         if (!requireProFeature('Browser Synth')) return;
         synthDragging = true;
         synthStartY = e.clientY;
@@ -1998,12 +2004,14 @@
       });
       window.addEventListener('mouseup', () => { synthDragging = false; });
       synthDial.addEventListener('wheel', (e) => {
+        if (isShuttingDown) return;
         if (!requireProFeature('Browser Synth')) return;
         e.preventDefault();
         const delta = e.deltaY < 0 ? 3 : -3;
         setSynthVolume(Number(synthVolumeInput.value || 0) + delta);
       });
       synthDial.addEventListener('keydown', (e) => {
+        if (isShuttingDown) return;
         if (!requireProFeature('Browser Synth')) return;
         const cur = Number(synthVolumeInput.value || 0);
         if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setSynthVolume(cur + 2); }
@@ -2025,7 +2033,8 @@
       refreshAccessState();
       loadPorts();
       primeLiveNotesCursor().finally(() => {
-        setInterval(pollLiveNotes, 90);
+        if (liveNotesIntervalId) clearInterval(liveNotesIntervalId);
+        liveNotesIntervalId = setInterval(pollLiveNotes, 250);
       });
       // Safety: if a previous loop got stuck, stop it when this page boots.
       requestStop(true);
@@ -2034,6 +2043,11 @@
       });
 
       window.addEventListener('beforeunload', () => {
+        isShuttingDown = true;
+        if (liveNotesIntervalId) {
+          clearInterval(liveNotesIntervalId);
+          liveNotesIntervalId = null;
+        }
         stopAllBrowserVoices();
         ambienceOn = false;
         if (ambienceGainNode && audioCtx) {
@@ -2045,10 +2059,21 @@
         if (ambienceBgVideo) ambienceBgVideo.pause();
         document.body.classList.remove('ambience-active');
         stopLocalPlayback();
+        if (audioCtx && audioCtx.state !== 'closed') {
+          try { audioCtx.close(); } catch (_) {}
+        }
       });
       window.addEventListener('pagehide', () => {
+        isShuttingDown = true;
+        if (liveNotesIntervalId) {
+          clearInterval(liveNotesIntervalId);
+          liveNotesIntervalId = null;
+        }
         stopAllBrowserVoices();
         stopLocalPlayback();
+        if (audioCtx && audioCtx.state !== 'closed') {
+          try { audioCtx.close(); } catch (_) {}
+        }
       });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
