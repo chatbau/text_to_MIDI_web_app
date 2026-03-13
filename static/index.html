@@ -237,6 +237,16 @@
       .label-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
       .shift-field button { margin-top:0; }
       .unit-readout { font-size:11px; color:var(--accent); }
+      .pro-locked {
+        opacity: 0.42;
+        filter: grayscale(0.3);
+      }
+      button:disabled,
+      input:disabled,
+      select:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
       .num-control { display:grid; grid-template-columns: 1fr 36px; gap:0; }
       .num-input {
         min-height: 52px;
@@ -771,6 +781,7 @@
       let playbackRunId = 0;
       let scheduledTimers = [];
       let soundingNotes = new Set();
+      let synthVolumeBeforeLite = 70;
 
       function setAccessStatus(text) {
         accessStatusEl.textContent = text;
@@ -781,7 +792,7 @@
         return (premiumKeyInput?.value || localStorage.getItem('text_to_midi_premium_key') || '').trim();
       }
 
-      const SHARED_PREMIUM_KEY = 'patreon-premium-2026';
+      const SHARED_PREMIUM_KEY = 't2m-pro-2026-9Kx7mQ4vLp2ZaH8n';
       const KEY_TO_PC = { C:0, 'C#':1, Db:1, D:2, 'D#':3, Eb:3, E:4, F:5, 'F#':6, Gb:6, G:7, 'G#':8, Ab:8, A:9, 'A#':10, Bb:10, B:11 };
       const MODE_TO_STEPS = {
         major:[0,2,4,5,7,9,11],
@@ -811,10 +822,61 @@
       ];
 
       function setPaidUiState() {
-        const ok = !premiumRequired || premiumUnlocked;
-        button.disabled = !ok;
-        saveMidiBtn.disabled = !ok;
-        stopMidiBtn.disabled = !ok;
+        // Core transport stays available in Lite. Pro-specific controls are gated separately.
+        applyFeatureGating();
+      }
+
+      function hasProAccess() {
+        return !premiumRequired || premiumUnlocked;
+      }
+
+      function requireProFeature(label = 'This') {
+        if (hasProAccess()) return true;
+        statusEl.textContent = `Pro feature locked: ${label}. Enter premium key to unlock.`;
+        return false;
+      }
+
+      function applyFeatureGating() {
+        const pro = hasProAccess();
+        const proControls = [
+          randomizeAllBtn,
+          randomizeTextBtn,
+          lockTextBtn,
+          ambienceToggleBtn,
+          voicingSelect,
+          octaveShiftInput,
+          degreeShiftInput,
+          synthDial
+        ];
+        proControls.forEach((el) => {
+          if (!el) return;
+          el.disabled = !pro;
+          el.setAttribute('aria-disabled', pro ? 'false' : 'true');
+          el.classList.toggle('pro-locked', !pro);
+        });
+        stepButtons.forEach((btn) => {
+          const targetId = btn.getAttribute('data-target');
+          if (targetId === 'octave_shift' || targetId === 'degree_shift') {
+            btn.disabled = !pro;
+            btn.setAttribute('aria-disabled', pro ? 'false' : 'true');
+            btn.classList.toggle('pro-locked', !pro);
+          }
+        });
+        resetShiftsBtn.disabled = !pro;
+        resetShiftsBtn.setAttribute('aria-disabled', pro ? 'false' : 'true');
+        resetShiftsBtn.classList.toggle('pro-locked', !pro);
+
+        if (!pro) {
+          if (synthVolume > 0) synthVolumeBeforeLite = synthVolume;
+          setSynthVolume(0);
+          if (ambienceOn) {
+            ambienceOn = false;
+            updateAmbienceUi();
+            setAmbienceVisual(false);
+          }
+        } else if (synthVolume === 0 && synthVolumeBeforeLite > 0) {
+          setSynthVolume(synthVolumeBeforeLite);
+        }
       }
 
       async function ensureWebMidi() {
@@ -960,9 +1022,9 @@
         const bpm = Math.max(20, Math.min(200, Number(tempoInput.value || 60)));
         const key = keySelect.value || 'C';
         const mode = modeSelect.value || 'major';
-        const voicing = voicingSelect.value || 'closed';
-        const degreeShift = Number(degreeShiftInput.value || 0);
-        const octaveShift = Number(octaveShiftInput.value || 0);
+        const voicing = hasProAccess() ? (voicingSelect.value || 'closed') : 'closed';
+        const degreeShift = hasProAccess() ? Number(degreeShiftInput.value || 0) : 0;
+        const octaveShift = hasProAccess() ? Number(octaveShiftInput.value || 0) : 0;
         const bendAmount = Math.max(0, Math.min(100, Number(bendInput.value || 0)));
         const beatSec = 60 / bpm;
         const tokens = tokenize(text);
@@ -1098,9 +1160,14 @@
 
       async function refreshAccessState() {
         premiumRequired = true;
+        const forceLite = new URLSearchParams(window.location.search).get('lite') === '1';
         const key = getPremiumKey();
-        premiumUnlocked = !!key && key === SHARED_PREMIUM_KEY;
-        setAccessStatus(premiumUnlocked ? 'Premium access unlocked.' : 'Premium key required.');
+        premiumUnlocked = !forceLite && !!key && key === SHARED_PREMIUM_KEY;
+        if (forceLite) {
+          setAccessStatus('Lite mode test enabled (?lite=1).');
+        } else {
+          setAccessStatus(premiumUnlocked ? 'Premium access unlocked.' : 'Premium key required.');
+        }
         setPaidUiState();
       }
 
@@ -1433,6 +1500,7 @@
       }
 
       function playBrowserNote(note, velocity = 100, startOffsetSec = 0) {
+        if (!hasProAccess()) return;
         if (synthVolume <= 0) return;
         const ctx = ensureAudioContext();
         if (!ctx) return;
@@ -1564,9 +1632,8 @@
             if (!loopOn) {
               break;
             }
-            await new Promise((resolve) => {
-              scheduleTimer(totalMs + loopGapMs, resolve, runId);
-            });
+            await new Promise((resolve) => setTimeout(resolve, Math.max(0, totalMs + loopGapMs)));
+            if (runId !== playbackRunId) break;
           } while (runId === playbackRunId && loopEnabledInput.checked);
 
           if (runId !== playbackRunId) {
@@ -1665,6 +1732,7 @@
 
       refreshPortsBtn.addEventListener('click', loadPorts);
       randomizeAllBtn.addEventListener('click', async () => {
+        if (!requireProFeature('Randomize All')) return;
         recordHistoryState(false);
         statusEl.textContent = 'Randomizing...';
         try {
@@ -1699,6 +1767,7 @@
       });
 
       randomizeTextBtn.addEventListener('click', async () => {
+        if (!requireProFeature('Randomize Text')) return;
         recordHistoryState(false);
         statusEl.textContent = 'Randomizing text...';
         try {
@@ -1709,6 +1778,7 @@
         }
       });
       lockTextBtn.addEventListener('click', () => {
+        if (!requireProFeature('Text Lock')) return;
         textLocked = !textLocked;
         updateTextLockUi();
         statusEl.textContent = textLocked ? 'Text lock enabled.' : 'Text lock disabled.';
@@ -1721,6 +1791,7 @@
         }
       });
       ambienceToggleBtn.addEventListener('click', async () => {
+        if (!requireProFeature('Ambience')) return;
         ambienceOn = !ambienceOn;
         updateAmbienceUi();
         try {
@@ -1915,6 +1986,7 @@
       let synthStartY = 0;
       let synthStartVal = 0;
       synthDial.addEventListener('mousedown', (e) => {
+        if (!requireProFeature('Browser Synth')) return;
         synthDragging = true;
         synthStartY = e.clientY;
         synthStartVal = Number(synthVolumeInput.value || 0);
@@ -1926,11 +1998,13 @@
       });
       window.addEventListener('mouseup', () => { synthDragging = false; });
       synthDial.addEventListener('wheel', (e) => {
+        if (!requireProFeature('Browser Synth')) return;
         e.preventDefault();
         const delta = e.deltaY < 0 ? 3 : -3;
         setSynthVolume(Number(synthVolumeInput.value || 0) + delta);
       });
       synthDial.addEventListener('keydown', (e) => {
+        if (!requireProFeature('Browser Synth')) return;
         const cur = Number(synthVolumeInput.value || 0);
         if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setSynthVolume(cur + 2); }
         if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setSynthVolume(cur - 2); }
