@@ -1,0 +1,1986 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>text_to_MIDI</title>
+    <style>
+      :root {
+        --bg:#100909;
+        --panel:#1a1010;
+        --ink:#f2e6d4;
+        --line:#4f3a2f;
+        --accent:#fcc86e;
+        --muted:#bba790;
+        --danger:#ff8e8e;
+      }
+      html, body {
+        min-height: 100%;
+        background: radial-gradient(circle at 18% 10%, #1b1111, #060606 58%);
+      }
+      body { margin:0; font-family: "SF Mono","Menlo","Monaco","Cascadia Code","Consolas",monospace; color:var(--ink); position: relative; overflow-x: hidden; }
+      #ambienceBgVideo {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        opacity: 0;
+        pointer-events: none;
+        z-index: 0;
+        transition: opacity 900ms ease;
+        filter: brightness(0.62) saturate(1.15) contrast(1.04);
+      }
+      body.ambience-active #ambienceBgVideo { opacity: 1; }
+      .wrap { max-width: 860px; margin: 30px auto; padding: 16px; position: relative; z-index: 2; }
+      .card { background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:18px; box-shadow: 0 14px 36px rgba(0,0,0,.45); position: relative; z-index: 2; }
+      h1 { margin:0 0 3px; font-size:26px; letter-spacing:.5px; color:#f5efe5; font-family: inherit; font-weight:900; }
+      .title-midi { color: var(--accent); }
+      .title-underscore { color:#ffffff; }
+      p { margin:0 0 6px; color: var(--muted); line-height:1.15; }
+      textarea, input, select, button { width:100%; box-sizing:border-box; border-radius:2px; border:1px solid var(--line); padding:10px 12px; font-size:14px; font-family: inherit; background:#090909; color:var(--ink); }
+      textarea:focus,
+      textarea:focus-visible {
+        outline: none;
+        box-shadow: none;
+        border-color: var(--line);
+      }
+      input, select, button { min-height: 44px; }
+      select {
+        appearance: none;
+        -webkit-appearance: none;
+        -moz-appearance: none;
+        padding-right: 38px;
+        background-image:
+          linear-gradient(45deg, transparent 50%, var(--accent) 50%),
+          linear-gradient(135deg, var(--accent) 50%, transparent 50%);
+        background-position:
+          calc(100% - 18px) 53%,
+          calc(100% - 12px) 53%;
+        background-size: 6px 6px, 6px 6px;
+        background-repeat: no-repeat;
+      }
+      textarea { min-height: 140px; resize: vertical; line-height: 1.4; }
+      .row { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin:10px 0; }
+      button { background:#121212; color: var(--accent); border: 1px solid #7a5a2b; font-weight: 700; cursor: pointer; margin-top:8px; text-transform: uppercase; letter-spacing: .4px; }
+      .row button { margin-top: 0; }
+      button:disabled { opacity:.6; cursor: progress; }
+      button:hover { filter: brightness(1.08); }
+      button:active { transform: translateY(1px); }
+      .btn-primary { background:#5b3b17; border-color:#fcc86e; color:#fff3dd; font-size:16px; padding:14px 12px; }
+      .btn-secondary { background:#221712; }
+      .btn-random-all { background:#3b2615; border-color:#9f7540; }
+      .btn-with-icon { display:inline-flex; align-items:center; justify-content:center; gap:8px; }
+      .btn-icon { width:20px; height:20px; image-rendering: pixelated; }
+      .hint { color: var(--muted); font-size: 12px; margin-top: 6px; }
+      #status { margin-top: 10px; font-size: 13px; min-height: 20px; color: var(--accent); }
+      .label { font-size: 12px; color: var(--muted); margin: 4px 0 6px; text-transform: uppercase; letter-spacing: .5px; }
+      .label-input { color: var(--accent); }
+      .label-output { color: var(--accent); }
+      .session-title { font-size: 14px; font-weight: 800; color: var(--accent); letter-spacing: .7px; }
+      .text-tools { display:flex; justify-content:flex-start; align-items:flex-end; gap:12px; margin-top:0; margin-bottom:6px; }
+      .text-tools button { width:auto; margin-top:0; }
+      .ambience-video-btn {
+        width: 72px;
+        min-width: 72px;
+        max-width: 72px;
+        height: 72px;
+        min-height: 72px;
+        max-height: 72px;
+        flex: 0 0 72px;
+        padding: 0;
+        overflow: hidden;
+        position: relative;
+        background: #17100d;
+        border-radius: 50%;
+        border: 1px solid var(--line);
+        margin-top: 0;
+      }
+      #ambienceToggleVideo {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        object-position: center 145%;
+        transform: scale(2.15);
+        transform-origin: center;
+        display: block;
+        opacity: 0.42;
+        filter: saturate(0.82) brightness(0.66) blur(0.32px);
+        transition: opacity 240ms ease, filter 240ms ease;
+        pointer-events: none;
+      }
+      .ambience-video-btn.btn-toggle-active #ambienceToggleVideo {
+        opacity: 1;
+        filter: saturate(1.15) brightness(1) blur(0);
+      }
+      .btn-toggle-active { background:#5b3b17; border-color:#fcc86e; color:#fff3dd; }
+      .icon-lock-btn { width:44px; min-width:44px; padding:0; display:inline-flex; align-items:center; justify-content:center; line-height:1; }
+      .lock-glyph {
+        width: 24px;
+        height: 24px;
+        display: inline-block;
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: contain;
+        image-rendering: pixelated;
+        background-image: url('./lock_icon_locked.png');
+      }
+      .icon-lock-btn.unlocked .lock-glyph {
+        background-image: url('./lock_icon_unlocked.png');
+      }
+      #lockText .lock-glyph {
+        width: 46px;
+        height: 46px;
+        background-image: url('./lock_icon_locked_text.png');
+        transform: none;
+      }
+      #lockText.unlocked .lock-glyph {
+        background-image: url('./lock_icon_unlocked_text.png');
+      }
+      .text-tools #lockText {
+        width: 44px;
+        min-width: 44px;
+        max-width: 44px;
+        height: 44px;
+        min-height: 44px;
+        max-height: 44px;
+        flex: 0 0 44px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        overflow: visible;
+      }
+      .performance-wrap { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:28px; margin:12px 0 2px; }
+      .control-block { display:flex; flex-direction:column; align-items:center; justify-content:flex-start; gap:6px; }
+      .synth-dial { width:72px; height:72px; }
+      .synth-dial .dial-inner { width:52px; height:52px; }
+      .bend-label { color: var(--muted); font-size: 11px; letter-spacing:.4px; text-transform: uppercase; min-width: 0; text-align:center; }
+      .dial { --value:0; width:72px; height:72px; border-radius:50%; border:1px solid var(--line); background: conic-gradient(var(--accent) calc(var(--value) * 1%), #3b2a22 0); display:grid; place-items:center; cursor: ns-resize; user-select:none; }
+      .dial:focus { outline: 1px solid var(--accent); }
+      .dial-inner { width:52px; height:52px; border-radius:50%; border:1px solid #5a4334; background:#17100d; display:grid; place-items:center; }
+      .bend-value { min-width: 0; text-align: center; color: var(--accent); font-size: 12px; }
+      .topbar { display:flex; align-items:flex-start; gap:14px; margin-bottom: 4px; }
+      .access-bar {
+        border: 1px solid var(--line);
+        background: #0d0d0d;
+        padding: 10px;
+        margin: 0;
+      }
+      .access-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+      }
+      .access-help {
+        color: var(--muted);
+        font-size: 11px;
+        margin-top: 8px;
+        line-height: 1.35;
+      }
+      .access-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .access-actions button {
+        width: auto;
+        min-height: 36px;
+        margin-top: 0;
+      }
+      .access-status {
+        color: var(--muted);
+        font-size: 12px;
+        margin-top: 8px;
+        min-height: 16px;
+      }
+      .notes-panel { border:1px solid var(--line); background:#0c0c0c; padding:10px; position: relative; min-height: 0; }
+      .notes-panel summary { cursor:pointer; list-style:none; }
+      .notes-panel summary::-webkit-details-marker { display:none; }
+      .notes-title { margin:0; font-size:12px; color:var(--accent); text-transform:uppercase; letter-spacing:.5px; font-weight:700; }
+      .notes-header { margin:0 0 6px; display:flex; justify-content:space-between; align-items:center; gap:8px; }
+      .notes-actions { display:flex; align-items:center; gap:8px; }
+      .notes-clear { width:auto; min-height:24px; margin:0; padding:2px 8px; font-size:10px; letter-spacing:.3px; }
+      .notes-meta { margin:0 0 8px; font-size:11px; color:var(--muted); min-height:14px; }
+      .note-feed { border:1px solid var(--line); background:#070707; min-height:200px; max-height:420px; overflow:auto; padding:8px; font-size:12px; }
+      .note-row { display:flex; justify-content:space-between; gap:8px; padding:3px 0; border-bottom:1px dashed rgba(252, 200, 110, 0.12); }
+      .note-row:last-child { border-bottom:0; }
+      .note-name { color:var(--accent); }
+      .portrait { width:64px; height:64px; object-fit:cover; border:1px solid var(--line); border-radius:2px; image-rendering: pixelated; }
+      .title-wrap { flex:1; }
+      .actions-row { display:grid; grid-template-columns: 2fr 1fr 1fr; gap:10px; margin-top: 8px; }
+      #randomizeText,
+      #refreshPorts,
+      #randomizeAll,
+      #stopMidi {
+        border-color: #7a5a2b;
+        color: var(--accent);
+        background: #121212;
+      }
+      .notes-title, .notes-clear { color: var(--accent); border-color: #7a5a2b; }
+      .mapping-info { border:1px solid var(--line); background:#0d0d0d; padding:10px 12px; margin: 14px 0 0; }
+      .mapping-info summary { cursor:pointer; color:var(--accent); font-weight:700; text-transform: uppercase; letter-spacing:.4px; }
+      .mapping-list { margin:8px 0 0 16px; padding:0; color:var(--muted); font-size:12px; line-height:1.45; }
+      .mapping-detail { margin-top:8px; color:var(--muted); font-size:12px; line-height:1.55; }
+      .mapping-detail p { margin:0 0 8px; }
+      .loop-wrap { display:flex; align-items:center; gap:8px; margin-top:8px; color:var(--muted); font-size:12px; }
+      .loop-wrap input[type="checkbox"] { width:16px; height:16px; min-height:0; accent-color: var(--accent); }
+      .loop-gap-control { width:140px; }
+      .loop-gap-control .num-input { min-height:44px; font-size:14px; }
+      .loop-gap-control .step-btn { min-height:22px; }
+      .session-box { border:1px solid var(--line); background:#0d0d0d; padding:12px; margin-top:8px; }
+      .settings-grid { display:grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap:10px; margin-top:4px; }
+      .setting-field { display:flex; flex-direction:column; gap:6px; }
+      .shift-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; margin-top:10px; }
+      .shift-field { display:flex; flex-direction:column; gap:6px; }
+      .setting-field .label, .shift-field .label { margin:0; }
+      .label-row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+      .shift-field button { margin-top:0; }
+      .unit-readout { font-size:11px; color:var(--accent); }
+      .num-control { display:grid; grid-template-columns: 1fr 36px; gap:0; }
+      .num-input {
+        min-height: 52px;
+        font-size: 16px;
+        border-right: 0;
+        border-radius: 2px 0 0 2px;
+        appearance: textfield;
+        -moz-appearance: textfield;
+      }
+      .num-input::-webkit-outer-spin-button,
+      .num-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+      .stepper { display:grid; grid-template-rows: 1fr 1fr; border:1px solid var(--line); border-left:0; border-radius:0 2px 2px 0; overflow:hidden; }
+      .step-btn {
+        min-height: 26px;
+        margin:0;
+        border:0;
+        border-top:1px solid var(--line);
+        border-radius:0;
+        padding:0;
+        background:#2b1d14;
+        color:var(--accent);
+        font-size:12px;
+        line-height:1;
+      }
+      .stepper .step-btn:first-child { border-top:0; }
+      .reset-shifts-btn { min-height: 52px; margin-top: 0; }
+      .icon { display:inline-block; vertical-align:middle; margin-right:8px; color:var(--accent); }
+      .icon-die { width:3px; height:3px; box-shadow:
+        0 0 0 1px currentColor,
+        3px 0 0 1px currentColor,
+        6px 0 0 1px currentColor,
+        0 3px 0 1px currentColor,
+        3px 3px 0 1px currentColor,
+        6px 3px 0 1px currentColor,
+        0 6px 0 1px currentColor,
+        3px 6px 0 1px currentColor,
+        6px 6px 0 1px currentColor,
+        1px 1px 0 0 #2a1b18,
+        5px 1px 0 0 #2a1b18,
+        3px 3px 0 0 #2a1b18,
+        1px 5px 0 0 #2a1b18,
+        5px 5px 0 0 #2a1b18; }
+      .icon-save { width:3px; height:3px; box-shadow:
+        0 0 0 1px currentColor,
+        3px 0 0 1px currentColor,
+        6px 0 0 1px currentColor,
+        0 3px 0 1px currentColor,
+        6px 3px 0 1px currentColor,
+        0 6px 0 1px currentColor,
+        3px 6px 0 1px currentColor,
+        6px 6px 0 1px currentColor,
+        0 9px 0 1px currentColor,
+        3px 9px 0 1px currentColor,
+        6px 9px 0 1px currentColor,
+        1px 1px 0 0 #2a1b18,
+        2px 1px 0 0 #2a1b18,
+        4px 1px 0 0 #2a1b18,
+        5px 1px 0 0 #2a1b18,
+        1px 5px 0 0 #2a1b18,
+        2px 5px 0 0 #2a1b18,
+        4px 5px 0 0 #2a1b18,
+        5px 5px 0 0 #2a1b18; }
+      .notes-flyout {
+        position: absolute;
+        top: 16px;
+        left: calc(100% + 8px);
+        width: 320px;
+        z-index: 20;
+      }
+      .access-flyout {
+        position: absolute;
+        top: 16px;
+        right: calc(100% + 8px);
+        width: 340px;
+        z-index: 20;
+      }
+      .access-flyout .access-panel {
+        border: 1px solid var(--line);
+        background: #0c0c0c;
+        padding: 10px;
+        box-shadow: 0 14px 36px rgba(0,0,0,.45);
+      }
+      .access-flyout .access-panel > summary {
+        cursor: pointer;
+        list-style: none;
+        position: absolute;
+        top: 10px;
+        left: -108px;
+        width: 98px;
+        border: 1px solid #7a5a2b;
+        background: #2b1d14;
+        color: var(--accent);
+        text-align: center;
+        padding: 10px 6px;
+        font-size: 10px;
+        letter-spacing: .5px;
+        line-height: 1.2;
+        border-radius: 2px 0 0 2px;
+        text-transform: uppercase;
+        font-weight: 700;
+      }
+      .access-flyout .access-panel > summary::-webkit-details-marker { display:none; }
+      .access-flyout .access-panel:not([open]) {
+        width: 104px;
+        margin-left: auto;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+      .access-flyout .access-panel:not([open]) > summary {
+        position: relative;
+        top: 0;
+        left: 0;
+        width: 100%;
+        border-radius: 2px;
+      }
+      .access-flyout .access-panel:not([open]) .access-body { display:none; }
+      .access-flyout .access-panel[open] > summary {
+        border-radius: 2px;
+        left: 0;
+        top: -42px;
+        width: auto;
+        min-width: 138px;
+      }
+      .access-flyout .access-actions button {
+        min-height: 34px;
+      }
+      .notes-flyout .notes-panel {
+        box-shadow: 0 14px 36px rgba(0,0,0,.45);
+      }
+      .notes-flyout .notes-panel > summary {
+        position: absolute;
+        top: 10px;
+        left: -108px;
+        width: 98px;
+        border: 1px solid #7a5a2b;
+        background: #2b1d14;
+        color: var(--accent);
+        text-align: center;
+        padding: 10px 6px;
+        font-size: 10px;
+        letter-spacing: .5px;
+        line-height: 1.2;
+        border-radius: 2px 0 0 2px;
+      }
+      .notes-flyout .notes-panel:not([open]) {
+        width: 104px;
+        border: 0;
+        padding: 0;
+        background: transparent;
+        box-shadow: none;
+      }
+      .notes-flyout .notes-panel:not([open]) > summary {
+        position: relative;
+        top: 0;
+        left: 0;
+        width: 100%;
+        border-radius: 2px;
+      }
+      .notes-flyout .notes-panel:not([open]) .notes-body {
+        display: none;
+      }
+      .notes-flyout .notes-panel[open] > summary {
+        border-radius: 2px;
+        left: 0;
+        top: -42px;
+        width: auto;
+        min-width: 138px;
+      }
+      .notes-flyout .notes-panel[open] .note-feed {
+        max-height: min(46vh, 420px);
+      }
+      .note-feed::-webkit-scrollbar,
+      textarea::-webkit-scrollbar,
+      select::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+      }
+      .note-feed::-webkit-scrollbar-track,
+      textarea::-webkit-scrollbar-track,
+      select::-webkit-scrollbar-track {
+        background: #120d0b;
+        border-left: 1px solid #3d2b22;
+      }
+      .note-feed::-webkit-scrollbar-thumb,
+      textarea::-webkit-scrollbar-thumb,
+      select::-webkit-scrollbar-thumb {
+        background: linear-gradient(#6a4a25, #4f361d);
+        border: 1px solid #7a5a2b;
+        border-radius: 2px;
+      }
+      .note-feed::-webkit-scrollbar-thumb:hover,
+      textarea::-webkit-scrollbar-thumb:hover,
+      select::-webkit-scrollbar-thumb:hover {
+        background: linear-gradient(#7b562c, #5b3d20);
+      }
+      .note-feed,
+      textarea {
+        scrollbar-color: #6a4a25 #120d0b;
+        scrollbar-width: thin;
+      }
+      @media (max-width: 700px) {
+        .row { grid-template-columns: 1fr; }
+        .actions-row { grid-template-columns: 1fr; }
+        .bend-wrap { justify-content: center; }
+        .text-tools { flex-direction: column; align-items: stretch; }
+        .performance-wrap { grid-template-columns: 1fr; gap:14px; }
+        .notes-flyout {
+          position: fixed;
+          right: 8px;
+          left: auto;
+          top: 8px;
+          width: min(320px, calc(100vw - 16px));
+        }
+        .access-flyout {
+          position: fixed;
+          left: 8px;
+          right: auto;
+          top: 8px;
+          width: min(340px, calc(100vw - 16px));
+        }
+        .access-flyout .access-panel > summary {
+          right: auto;
+          left: 0;
+          top: 0;
+          border-radius: 2px;
+        }
+        .access-flyout .access-panel[open] > summary {
+          top: -42px;
+          left: 0;
+          right: auto;
+        }
+        .notes-flyout .notes-panel > summary {
+          left: auto;
+          right: 0;
+          top: 0;
+          border-radius: 2px;
+        }
+        .notes-flyout .notes-panel[open] > summary {
+          top: -42px;
+          right: 0;
+          left: auto;
+        }
+        .note-feed { min-height:160px; max-height:230px; }
+      }
+    </style>
+  </head>
+  <body>
+    <video id="ambienceBgVideo" muted loop playsinline preload="auto">
+      <source src="./flowing_grass_3.mp4" type="video/mp4" />
+    </video>
+    <div class="wrap">
+      <div class="card">
+        <div class="topbar">
+          <img src="./image.jpg" alt="Reference" class="portrait" />
+          <div class="title-wrap">
+            <h1>text<span class="title-underscore">_</span>to<span class="title-underscore">_</span><span class="title-midi">MIDI</span></h1>
+            <p>Type text, pick tempo/key/mode, choose a MIDI output port, then send live to your DAW.</p>
+          </div>
+        </div>
+
+        <form id="form">
+          <div class="text-tools">
+            <button id="randomizeText" class="btn-secondary" type="button">Randomize Text</button>
+            <button id="lockText" class="btn-secondary icon-lock-btn unlocked" type="button" aria-pressed="false" aria-label="Text unlocked" title="Text unlocked"><span class="lock-glyph" aria-hidden="true"></span></button>
+            <button id="undoState" class="btn-secondary" type="button">Undo</button>
+          </div>
+          <textarea id="text" name="text" placeholder="Type your text here..." required></textarea>
+          <div class="hint">Press <strong>Enter</strong> to send. Use <strong>Shift+Enter</strong> for a new line.</div>
+
+          <div class="label session-title">Session Settings</div>
+          <div class="session-box">
+            <div class="settings-grid">
+              <div class="setting-field">
+                <div class="label-row">
+                  <div class="label">BPM</div>
+                  <div class="unit-readout">20-200</div>
+                </div>
+                <div class="num-control">
+                  <input id="tempo_bpm" class="num-input" name="tempo_bpm" type="number" min="20" max="200" step="1" value="60" />
+                  <div class="stepper">
+                    <button class="step-btn" type="button" data-target="tempo_bpm" data-step="5">▲</button>
+                    <button class="step-btn" type="button" data-target="tempo_bpm" data-step="-5">▼</button>
+                  </div>
+                </div>
+              </div>
+              <div class="setting-field">
+                <div class="label">Key</div>
+                <select id="key" name="key">
+                  <option>C</option><option>C#</option><option>Db</option><option>D</option><option>D#</option><option>Eb</option>
+                  <option>E</option><option>F</option><option>F#</option><option>Gb</option><option>G</option><option>G#</option>
+                  <option>Ab</option><option>A</option><option>A#</option><option>Bb</option><option>B</option>
+                </select>
+              </div>
+              <div class="setting-field">
+                <div class="label">Mode</div>
+                <select id="mode" name="mode">
+                  <option>major</option><option>minor</option><option>chromatic</option><option>major7</option><option>minor7</option><option>major_pentatonic</option><option>minor_pentatonic</option><option>dorian</option><option>phrygian</option>
+                  <option>lydian</option><option>mixolydian</option><option>locrian</option>
+                </select>
+              </div>
+              <div class="setting-field">
+                <div class="label">Voicing</div>
+                <select id="voicing_mode" name="voicing_mode">
+                  <option value="closed">closed</option>
+                  <option value="open">open</option>
+                </select>
+              </div>
+            </div>
+            <div class="shift-grid">
+              <div class="shift-field">
+                <div class="label-row">
+                  <div class="label">Octave Shift</div>
+                  <div id="octaveUnit" class="unit-readout">0 OCT</div>
+                </div>
+                <div class="num-control">
+                  <input id="octave_shift" class="num-input" name="octave_shift" type="number" min="-3" max="3" step="1" value="0" />
+                  <div class="stepper">
+                    <button class="step-btn" type="button" data-target="octave_shift" data-step="1">▲</button>
+                    <button class="step-btn" type="button" data-target="octave_shift" data-step="-1">▼</button>
+                  </div>
+                </div>
+              </div>
+              <div class="shift-field">
+                <div class="label-row">
+                  <div class="label">Scale Degree Shift</div>
+                  <div id="degreeUnit" class="unit-readout">0 SD</div>
+                </div>
+                <div class="num-control">
+                  <input id="degree_shift" class="num-input" name="degree_shift" type="number" min="-14" max="14" step="1" value="0" />
+                  <div class="stepper">
+                    <button class="step-btn" type="button" data-target="degree_shift" data-step="1">▲</button>
+                    <button class="step-btn" type="button" data-target="degree_shift" data-step="-1">▼</button>
+                  </div>
+                </div>
+              </div>
+              <div class="shift-field">
+                <div class="label">Shift Controls</div>
+                <button id="resetShifts" class="btn-secondary reset-shifts-btn" type="button">Reset Shifts</button>
+              </div>
+            </div>
+
+            <div class="performance-wrap">
+              <div class="control-block">
+                <div class="bend-label">Bend Amount</div>
+                <div id="bendDial" class="dial" role="slider" aria-label="Bend Amount" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                  <div class="dial-inner"></div>
+                </div>
+                <div id="bendValue" class="bend-value">BEND OFF</div>
+                <input id="bend_amount" name="bend_amount" type="hidden" value="0" />
+              </div>
+              <div class="control-block">
+                <div class="bend-label">Ambience</div>
+                <button id="ambienceToggle" class="btn-secondary ambience-video-btn" type="button" aria-label="Ambience toggle" title="Ambience">
+                  <video id="ambienceToggleVideo" muted loop playsinline preload="auto">
+                    <source src="./flowing_grass_cropped_1.mp4" type="video/mp4" />
+                  </video>
+                </button>
+              </div>
+              <div class="control-block">
+                <div class="bend-label">Browser Synth</div>
+                <div
+                  id="synthDial"
+                  class="dial synth-dial"
+                  role="slider"
+                  aria-label="Browser Synth Volume"
+                  aria-valuemin="0"
+                  aria-valuemax="100"
+                  aria-valuenow="70"
+                  tabindex="0"
+                >
+                  <div class="dial-inner"></div>
+                </div>
+                <div id="synthValue" class="bend-value">70%</div>
+                <input id="synth_volume" type="hidden" value="70" />
+              </div>
+            </div>
+          </div>
+
+          <div class="label label-output">MIDI Output</div>
+          <div class="row">
+            <select id="port_name" name="port_name"></select>
+            <button id="refreshPorts" class="btn-secondary" type="button">Refresh Ports</button>
+            <button id="randomizeAll" class="btn-random-all" type="button">Randomize All</button>
+          </div>
+          <div class="loop-wrap">
+            <input id="loop_enabled" name="loop_enabled" type="checkbox" />
+            <label for="loop_enabled">Loop Live Send</label>
+            <div class="num-control loop-gap-control">
+              <input id="loop_gap_ms" class="num-input" name="loop_gap_ms" type="number" min="90" max="5000" step="1" value="120" />
+              <div class="stepper">
+                <button class="step-btn" type="button" data-target="loop_gap_ms" data-step="10">▲</button>
+                <button class="step-btn" type="button" data-target="loop_gap_ms" data-step="-10">▼</button>
+              </div>
+            </div>
+            <span>ms gap</span>
+          </div>
+
+          <div class="actions-row">
+            <button id="submit" class="btn-primary" type="submit">SEND MIDI</button>
+            <button id="saveMidi" class="btn-secondary" type="button">Save MIDI File</button>
+            <button id="stopMidi" class="btn-secondary" type="button">Stop MIDI</button>
+          </div>
+        </form>
+        <div id="status"></div>
+        <details class="mapping-info">
+          <summary>How Mapping Works</summary>
+          <div class="mapping-detail">
+            <p><strong>1) Split + phrasing</strong>: text is split into words and punctuation. Words stay close together, while commas/periods create bigger pauses.</p>
+            <p><strong>2) Word to chord</strong>: each word maps to a root note and chord shape. Syllables (and phonetic chunks) help decide how many notes are in that chord.</p>
+            <p><strong>3) Similar words, similar feel</strong>: the mapping uses character/phonetic patterns, so related words often land in a related pitch area.</p>
+            <p><strong>4) Arpeggiation behavior</strong>: short words are usually tighter (more block-like). Longer words are more likely to roll/arpeggiate, with wider timing spread.</p>
+            <p><strong>5) Musical snapping</strong>: raw notes are quantized to your selected key and mode, then octave shift and scale-degree shift are applied.</p>
+            <p><strong>6) Human timing</strong>: note timing is slightly varied so attacks are not perfectly robotic. Phrase rubato adds subtle speed-up/slow-down.</p>
+            <p><strong>7) Dynamics + bend</strong>: velocity follows stress/position in phrase, and Bend adds optional pitch movement for extra expression.</p>
+          </div>
+        </details>
+      </div>
+      <aside class="access-flyout">
+        <details class="access-panel" open>
+          <summary>Premium Access</summary>
+          <div class="access-body">
+            <div class="access-bar">
+              <div class="access-row">
+                <input id="premiumKey" type="password" placeholder="Premium key" autocomplete="off" />
+              </div>
+              <div class="access-actions">
+                <button id="premiumUnlock" class="btn-secondary" type="button">Unlock</button>
+              </div>
+              <div class="access-help">Patreon handles payment. Enter your shared premium key to unlock the app.</div>
+              <div id="accessStatus" class="access-status">Checking premium access...</div>
+            </div>
+          </div>
+        </details>
+      </aside>
+      <aside class="notes-flyout">
+      <details class="notes-panel" open>
+        <summary class="notes-title">INCOMING NOTES</summary>
+        <div class="notes-body">
+          <div class="notes-header">
+            <div class="unit-readout">Live Monitor</div>
+            <div class="notes-actions">
+              <button id="clearNotes" class="btn-secondary notes-clear" type="button">Clear</button>
+            </div>
+          </div>
+          <div id="notesMeta" class="notes-meta">Waiting for MIDI...</div>
+          <div id="noteFeed" class="note-feed"></div>
+        </div>
+      </details>
+      </aside>
+    </div>
+
+    <script>
+      const form = document.getElementById('form');
+      const statusEl = document.getElementById('status');
+      const button = document.getElementById('submit');
+      const portSelect = document.getElementById('port_name');
+      const refreshPortsBtn = document.getElementById('refreshPorts');
+      const randomizeAllBtn = document.getElementById('randomizeAll');
+      const randomizeTextBtn = document.getElementById('randomizeText');
+      const lockTextBtn = document.getElementById('lockText');
+      const ambienceToggleBtn = document.getElementById('ambienceToggle');
+      const undoStateBtn = document.getElementById('undoState');
+      const saveMidiBtn = document.getElementById('saveMidi');
+      const stopMidiBtn = document.getElementById('stopMidi');
+      const noteFeedEl = document.getElementById('noteFeed');
+      const notesMetaEl = document.getElementById('notesMeta');
+      const clearNotesBtn = document.getElementById('clearNotes');
+      const notesPanel = document.querySelector('.notes-panel');
+      const notesSummary = notesPanel ? notesPanel.querySelector('summary') : null;
+      const accessPanel = document.querySelector('.access-panel');
+      const accessSummary = accessPanel ? accessPanel.querySelector('summary') : null;
+      const synthDial = document.getElementById('synthDial');
+      const synthValue = document.getElementById('synthValue');
+      const synthVolumeInput = document.getElementById('synth_volume');
+      const textArea = document.getElementById('text');
+      const tempoInput = document.getElementById('tempo_bpm');
+      const keySelect = document.getElementById('key');
+      const modeSelect = document.getElementById('mode');
+      const voicingSelect = document.getElementById('voicing_mode');
+      const octaveShiftInput = document.getElementById('octave_shift');
+      const degreeShiftInput = document.getElementById('degree_shift');
+      const octaveUnit = document.getElementById('octaveUnit');
+      const degreeUnit = document.getElementById('degreeUnit');
+      const resetShiftsBtn = document.getElementById('resetShifts');
+      const bendInput = document.getElementById('bend_amount');
+      const bendDial = document.getElementById('bendDial');
+      const bendValue = document.getElementById('bendValue');
+      const stepButtons = document.querySelectorAll('.step-btn');
+      const loopEnabledInput = document.getElementById('loop_enabled');
+      const loopGapInput = document.getElementById('loop_gap_ms');
+      const premiumKeyInput = document.getElementById('premiumKey');
+      const premiumUnlockBtn = document.getElementById('premiumUnlock');
+      const accessStatusEl = document.getElementById('accessStatus');
+      const uiClickAudio = new Audio('./ui_click.wav?v=20260304-082617');
+      uiClickAudio.preload = 'auto';
+      const ambienceAudio = new Audio('./ambience.wav');
+      ambienceAudio.loop = true;
+      ambienceAudio.preload = 'auto';
+      ambienceAudio.volume = 1.0;
+      const ambienceBgVideo = document.getElementById('ambienceBgVideo');
+      const ambienceToggleVideo = document.getElementById('ambienceToggleVideo');
+      const lockOnAudio = new Audio('./lock_sound.wav');
+      const lockOffAudio = new Audio('./unlock_sound.wav');
+      lockOnAudio.preload = 'auto';
+      lockOffAudio.preload = 'auto';
+      let noteAfterId = 0;
+      let liveNotesBootstrapped = false;
+      let synthVolume = 70;
+      let textLocked = false;
+      let suppressHistory = false;
+      const stateHistory = [];
+      let lastStateSerialized = '';
+      let historyTimer = null;
+      let audioCtx = null;
+      let synthVerbBus = null;
+      let synthOutputBus = null;
+      let ambienceOn = false;
+      let ambienceSourceNode = null;
+      let ambienceGainNode = null;
+      const AMBIENCE_TARGET_GAIN = 0.03;
+      const AMBIENCE_FADE_SEC = 0.75;
+      let ambiencePauseTimer = null;
+      let voiceCounter = 0;
+      const activeVoices = new Map();
+      const MAX_BROWSER_VOICES = 32;
+      let premiumUnlocked = false;
+      let premiumRequired = true;
+      let midiAccess = null;
+      let midiOutputMap = new Map();
+      let playbackRunId = 0;
+      let scheduledTimers = [];
+      let soundingNotes = new Set();
+
+      function setAccessStatus(text) {
+        accessStatusEl.textContent = text;
+      }
+
+
+      function getPremiumKey() {
+        return (premiumKeyInput?.value || localStorage.getItem('text_to_midi_premium_key') || '').trim();
+      }
+
+      const SHARED_PREMIUM_KEY = 'patreon-premium-2026';
+      const KEY_TO_PC = { C:0, 'C#':1, Db:1, D:2, 'D#':3, Eb:3, E:4, F:5, 'F#':6, Gb:6, G:7, 'G#':8, Ab:8, A:9, 'A#':10, Bb:10, B:11 };
+      const MODE_TO_STEPS = {
+        major:[0,2,4,5,7,9,11],
+        minor:[0,2,3,5,7,8,10],
+        chromatic:[0,1,2,3,4,5,6,7,8,9,10,11],
+        major7:[0,4,7,11],
+        minor7:[0,3,7,10],
+        major_pentatonic:[0,2,4,7,9],
+        minor_pentatonic:[0,3,5,7,10],
+        dorian:[0,2,3,5,7,9,10],
+        phrygian:[0,1,3,5,7,8,10],
+        lydian:[0,2,4,6,7,9,11],
+        mixolydian:[0,2,4,5,7,9,10],
+        locrian:[0,1,3,5,6,8,10]
+      };
+      const TEXT_POOL = [
+        'Sucking at something is the first step to being sorta good at something.',
+        'People get built different, and that is part of the beauty.',
+        'It gets easier, but you have to do it every day.',
+        'In a noisy world, rhythm can be a form of clarity.',
+        'Sometimes life is scary and dark, and we still move forward.',
+        'You can be soft and still be strong.',
+        'To live life, you need problems.',
+        'Every day is a chance to choose a better pattern.',
+        'I do not want perfect, I want real.',
+        'Even heroes get scared and keep going.'
+      ];
+
+      function setPaidUiState() {
+        const ok = !premiumRequired || premiumUnlocked;
+        button.disabled = !ok;
+        saveMidiBtn.disabled = !ok;
+        stopMidiBtn.disabled = !ok;
+      }
+
+      async function ensureWebMidi() {
+        if (!navigator.requestMIDIAccess) {
+          throw new Error('Web MIDI is not supported in this browser. Use Chrome/Edge.');
+        }
+        if (!midiAccess) {
+          midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+          midiAccess.onstatechange = () => {
+            refreshWebMidiOutputs();
+          };
+        }
+        return midiAccess;
+      }
+
+      function refreshWebMidiOutputs() {
+        midiOutputMap = new Map();
+        portSelect.innerHTML = '';
+        if (!midiAccess) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Click Refresh Ports';
+          portSelect.appendChild(opt);
+          return;
+        }
+        const outputs = Array.from(midiAccess.outputs.values());
+        for (const out of outputs) {
+          midiOutputMap.set(out.name, out);
+          const opt = document.createElement('option');
+          opt.value = out.name;
+          opt.textContent = out.name;
+          portSelect.appendChild(opt);
+        }
+        if (!outputs.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No MIDI ports found';
+          portSelect.appendChild(opt);
+        } else if (!midiOutputMap.has(portSelect.value)) {
+          portSelect.value = outputs[0].name;
+        }
+      }
+
+      function stopLocalPlayback() {
+        playbackRunId += 1;
+        for (const t of scheduledTimers) clearTimeout(t);
+        scheduledTimers = [];
+        stopAllBrowserVoices();
+        if (midiAccess) {
+          for (const out of midiAccess.outputs.values()) {
+            try {
+              for (let ch = 0; ch < 16; ch++) {
+                out.send([0xb0 + ch, 123, 0]); // all notes off
+                out.send([0xe0 + ch, 0, 64]);  // pitch bend center
+              }
+            } catch (_) {
+              // ignore per-port send errors
+            }
+          }
+        }
+        soundingNotes.clear();
+      }
+
+      function scheduleTimer(ms, fn, runId) {
+        const id = setTimeout(() => {
+          if (runId !== playbackRunId) return;
+          fn();
+        }, Math.max(0, Math.round(ms)));
+        scheduledTimers.push(id);
+      }
+
+      function stableHash(str) {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 16777619);
+        }
+        return h >>> 0;
+      }
+
+      function seededRand(seed, idx = 0) {
+        const x = Math.sin((seed + 1 + idx) * 12.9898) * 43758.5453123;
+        return x - Math.floor(x);
+      }
+
+      function countSyllables(word) {
+        const w = (word || '').toLowerCase().replace(/[^a-z]/g, '');
+        if (!w) return 1;
+        const groups = w.match(/[aeiouy]+/g);
+        let n = groups ? groups.length : 1;
+        if (w.endsWith('e') && n > 1) n -= 1;
+        return Math.max(1, n);
+      }
+
+      function tokenize(text) {
+        return (text.match(/[A-Za-z][A-Za-z'-]*|[.,!?;:]/g) || []);
+      }
+
+      function nearestPitchInScale(raw, key, mode, degreeShift = 0, octaveShift = 0) {
+        const steps = MODE_TO_STEPS[mode] || MODE_TO_STEPS.major;
+        const keyPc = KEY_TO_PC[key] ?? 0;
+        const target = Math.round(raw) + (Number(octaveShift || 0) * 12);
+        const cands = [];
+        for (let oct = -2; oct <= 9; oct++) {
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[(i + (Number(degreeShift || 0))) % steps.length];
+            const pc = (keyPc + step + 120) % 12;
+            cands.push((oct + 1) * 12 + pc);
+          }
+        }
+        let best = cands[0];
+        let bestD = Math.abs(best - target);
+        for (const c of cands) {
+          const d = Math.abs(c - target);
+          if (d < bestD) {
+            bestD = d;
+            best = c;
+          }
+        }
+        return Math.max(24, Math.min(108, best));
+      }
+
+      function buildChord(rawRoot, chordSize, key, mode, voicing, degreeShift, octaveShift) {
+        const steps = MODE_TO_STEPS[mode] || MODE_TO_STEPS.major;
+        const chord = [];
+        for (let i = 0; i < chordSize; i++) {
+          const idx = i * 2;
+          const st = steps[idx % steps.length] + 12 * Math.floor(idx / steps.length);
+          const raw = rawRoot + st;
+          chord.push(nearestPitchInScale(raw, key, mode, degreeShift, octaveShift));
+        }
+        chord.sort((a, b) => a - b);
+        if (voicing === 'open') {
+          for (let i = 1; i < chord.length; i += 2) chord[i] += 12;
+          chord.sort((a, b) => a - b);
+        }
+        return chord.map((n) => Math.max(24, Math.min(108, n)));
+      }
+
+      function composeEventsLocal() {
+        const text = String(textArea.value || '').trim();
+        if (!text) throw new Error('Type some text first.');
+        const bpm = Math.max(20, Math.min(200, Number(tempoInput.value || 60)));
+        const key = keySelect.value || 'C';
+        const mode = modeSelect.value || 'major';
+        const voicing = voicingSelect.value || 'closed';
+        const degreeShift = Number(degreeShiftInput.value || 0);
+        const octaveShift = Number(octaveShiftInput.value || 0);
+        const bendAmount = Math.max(0, Math.min(100, Number(bendInput.value || 0)));
+        const beatSec = 60 / bpm;
+        const tokens = tokenize(text);
+        const seedBase = stableHash(`${text}|${key}|${mode}|${voicing}|${degreeShift}|${octaveShift}`);
+        const events = [];
+
+        let wordIdx = 0;
+        for (let i = 0; i < tokens.length; i++) {
+          const tok = tokens[i];
+          const punct = /^[.,!?;:]$/.test(tok);
+          if (punct) {
+            const pGap = tok === ',' || tok === ';' || tok === ':' ? 0.18 : 0.34;
+            events.push({ chord: [], velocity: 0, duration_sec: 0, advance_sec: pGap, arpeggio_steps_sec: [], bend_curve: [], source_token: tok, source_units: [tok], source_syllables: 0 });
+            continue;
+          }
+
+          const syll = countSyllables(tok);
+          const chordSize = Math.max(2, Math.min(6, syll));
+          const seed = stableHash(`${seedBase}|${tok.toLowerCase()}|${wordIdx}`);
+          const rootRaw = 42 + Math.floor(seededRand(seed, 1) * 30);
+          const chord = buildChord(rootRaw, chordSize, key, mode, voicing, degreeShift, octaveShift);
+          const longWord = tok.length >= 7;
+          const arpProb = longWord ? 0.78 : 0.48;
+          const doArp = seededRand(seed, 2) < arpProb;
+          const arpSteps = [];
+          if (doArp && chord.length > 1) {
+            let spread = (0.012 + seededRand(seed, 3) * 0.035) * (0.9 + chord.length * 0.18);
+            for (let a = 0; a < chord.length - 1; a++) {
+              const jitter = (seededRand(seed, 10 + a) - 0.5) * 0.015;
+              arpSteps.push(Math.max(0.002, spread / (chord.length - 1) + jitter));
+            }
+          } else {
+            for (let a = 0; a < chord.length - 1; a++) arpSteps.push(0);
+          }
+          const durationSec = Math.max(0.08, beatSec * (0.28 + Math.min(0.55, tok.length * 0.02)));
+          const spaceAfter = (i < tokens.length - 1 && !/^[.,!?;:]$/.test(tokens[i + 1])) ? 0.03 : 0;
+          const advanceSec = durationSec + spaceAfter;
+          const velocity = Math.max(36, Math.min(118, Math.round(58 + seededRand(seed, 4) * 40)));
+
+          const bendCurve = [];
+          if (bendAmount > 0) {
+            const cents = bendAmount * 8;
+            const bend = Math.max(-8192, Math.min(8191, Math.round((cents / 200) * 8192)));
+            bendCurve.push([0.0, bend], [0.35, Math.round(bend * 0.25)], [0.75, 0], [1.0, 0]);
+          }
+
+          events.push({
+            chord,
+            velocity,
+            duration_sec: durationSec,
+            advance_sec: advanceSec,
+            arpeggio_steps_sec: arpSteps,
+            bend_curve: bendCurve,
+            source_token: tok,
+            source_units: splitTokenReadable(tok, syll),
+            source_syllables: syll
+          });
+          wordIdx += 1;
+        }
+        return events;
+      }
+
+      function appendMonitorGroupFromEvent(event, noteNames) {
+        const token = String(event.source_token || '');
+        const units = humanReadableUnits(token, event.source_units, Number(event.source_syllables || 0)).join('-');
+        const group = noteNames.map((name) => ({ name, token, units }));
+        if (group.length) appendNoteGroup(group);
+      }
+
+      function playEventsWebMidi(events, runId) {
+        const selected = portSelect.value || '';
+        const out = selected ? midiOutputMap.get(selected) : null;
+        const baseMs = performance.now();
+        let cursorSec = 0;
+
+        for (const ev of events) {
+          const chord = Array.isArray(ev.chord) ? ev.chord.map((n) => Number(n)).filter(Number.isFinite) : [];
+          const velocity = Math.max(1, Math.min(127, Number(ev.velocity || 100)));
+          const durationSec = Math.max(0, Number(ev.duration_sec || 0));
+          const advanceSec = Math.max(0, Number(ev.advance_sec || 0));
+          const arp = Array.isArray(ev.arpeggio_steps_sec) ? ev.arpeggio_steps_sec.map((x) => Number(x) || 0) : [];
+          const bendCurve = Array.isArray(ev.bend_curve) ? ev.bend_curve : [];
+          const eventStartMs = baseMs + (cursorSec * 1000);
+
+          if (chord.length) {
+            const noteNames = chord.map((n) => formatNoteNameForKey(n, keySelect.value));
+            scheduleTimer(eventStartMs - performance.now(), () => {
+              appendMonitorGroupFromEvent(ev, noteNames);
+            }, runId);
+          }
+
+          chord.forEach((note, i) => {
+            const stepSec = i === 0 ? 0 : (arp[i - 1] || 0);
+            const onMs = eventStartMs + (stepSec * 1000);
+            const offMs = onMs + (durationSec * 1000);
+            const noteInt = Math.max(0, Math.min(127, Math.round(note)));
+
+            scheduleTimer(onMs - performance.now(), () => {
+              if (out) {
+                out.send([0x90, noteInt, velocity]);
+                soundingNotes.add(noteInt);
+              }
+              playBrowserNote(noteInt, velocity, 0);
+            }, runId);
+
+            if (out && bendCurve.length) {
+              for (const pair of bendCurve) {
+                const frac = Math.max(0, Math.min(1, Number(pair?.[0] || 0)));
+                const bendVal = Math.max(-8192, Math.min(8191, Number(pair?.[1] || 0)));
+                const raw = bendVal + 8192;
+                const lsb = raw & 0x7f;
+                const msb = (raw >> 7) & 0x7f;
+                scheduleTimer((onMs - performance.now()) + (frac * durationSec * 1000), () => {
+                  out.send([0xe0, lsb, msb]);
+                }, runId);
+              }
+            }
+
+            scheduleTimer(offMs - performance.now(), () => {
+              if (out) {
+                out.send([0x80, noteInt, 0]);
+                soundingNotes.delete(noteInt);
+              }
+            }, runId);
+          });
+
+          cursorSec += advanceSec;
+        }
+
+        const totalMs = Math.max(0, Math.round(cursorSec * 1000));
+        return totalMs;
+      }
+
+      async function refreshAccessState() {
+        premiumRequired = true;
+        const key = getPremiumKey();
+        premiumUnlocked = !!key && key === SHARED_PREMIUM_KEY;
+        setAccessStatus(premiumUnlocked ? 'Premium access unlocked.' : 'Premium key required.');
+        setPaidUiState();
+      }
+
+      function ensureAudioContext() {
+        if (!audioCtx) {
+          const Ctx = window.AudioContext || window.webkitAudioContext;
+          if (!Ctx) return null;
+          audioCtx = new Ctx();
+          const master = audioCtx.createGain();
+          const limiter = audioCtx.createDynamicsCompressor();
+          master.gain.value = 1.2;
+          limiter.threshold.value = -12;
+          limiter.knee.value = 18;
+          limiter.ratio.value = 10;
+          limiter.attack.value = 0.003;
+          limiter.release.value = 0.14;
+          master.connect(limiter);
+          limiter.connect(audioCtx.destination);
+
+          const dryIn = audioCtx.createGain();
+          dryIn.gain.value = 1.0;
+          dryIn.connect(master);
+
+          const input = audioCtx.createGain();
+
+          // Hybrid-like reverb: early reflections (delay network) + late tail (convolution).
+          const erTap1 = audioCtx.createDelay(0.12);
+          const erTap2 = audioCtx.createDelay(0.12);
+          const erTap3 = audioCtx.createDelay(0.16);
+          const erTap4 = audioCtx.createDelay(0.18);
+          const erMix = audioCtx.createGain();
+          const erPanL = audioCtx.createStereoPanner();
+          const erPanR = audioCtx.createStereoPanner();
+          erTap1.delayTime.value = 0.017;
+          erTap2.delayTime.value = 0.029;
+          erTap3.delayTime.value = 0.041;
+          erTap4.delayTime.value = 0.057;
+          erMix.gain.value = 0.28;
+          erPanL.pan.value = -0.45;
+          erPanR.pan.value = 0.45;
+
+          input.connect(erTap1);
+          input.connect(erTap2);
+          input.connect(erTap3);
+          input.connect(erTap4);
+          erTap1.connect(erPanL);
+          erTap3.connect(erPanL);
+          erTap2.connect(erPanR);
+          erTap4.connect(erPanR);
+          erPanL.connect(erMix);
+          erPanR.connect(erMix);
+          erMix.connect(master);
+
+          const convolver = audioCtx.createConvolver();
+          const tailMix = audioCtx.createGain();
+          const tailPan = audioCtx.createStereoPanner();
+          tailMix.gain.value = 0.52;
+          tailPan.pan.value = 0.12;
+          convolver.buffer = createHybridIrBuffer(audioCtx, 2.8, 2.6);
+          input.connect(convolver);
+          convolver.connect(tailPan);
+          tailPan.connect(tailMix);
+          tailMix.connect(master);
+
+          synthVerbBus = { input, dryIn };
+          synthOutputBus = { master, limiter };
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+        return audioCtx;
+      }
+
+      function createHybridIrBuffer(ctx, seconds = 2.6, decay = 2.4) {
+        const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+        const ir = ctx.createBuffer(2, length, ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const data = ir.getChannelData(ch);
+          for (let i = 0; i < length; i++) {
+            const t = i / length;
+            const env = Math.pow(1 - t, decay);
+            const color = 0.65 + 0.35 * Math.sin((i / 97) + (ch * 0.8));
+            data[i] = ((Math.random() * 2 - 1) * env * color) * 0.9;
+          }
+        }
+        return ir;
+      }
+
+      function midiToHz(note) {
+        return 440 * Math.pow(2, (Number(note) - 69) / 12);
+      }
+
+      function prefersFlatsForKey(key) {
+        const k = String(key || '').trim();
+        return ['F', 'Bb', 'Eb', 'Ab', 'Db', 'Gb', 'Cb'].includes(k);
+      }
+
+      function formatNoteNameForKey(note, key) {
+        const n = Number(note);
+        if (!Number.isFinite(n)) return '';
+        const sharpNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+        const flatNames  = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+        const pc = ((Math.round(n) % 12) + 12) % 12;
+        const octave = Math.floor(Math.round(n) / 12) - 1;
+        const names = prefersFlatsForKey(key) ? flatNames : sharpNames;
+        return `${names[pc]}${octave}`;
+      }
+
+      function splitTokenReadable(token, syllableCount = 0) {
+        const raw = String(token || '').trim();
+        if (!raw) return [];
+        const clean = raw.replace(/[^A-Za-z]/g, '');
+        if (!clean) return [];
+        const target = Math.max(1, Number(syllableCount) || 0);
+        if (target <= 1) return [clean.toLowerCase()];
+        const groups = clean.match(/[^aeiouyAEIOUY]*[aeiouyAEIOUY]+(?:[^aeiouyAEIOUY](?=[^aeiouyAEIOUY]|$))?/g) || [clean];
+        let parts = groups.map((g) => g.toLowerCase()).filter(Boolean);
+        if (parts.length <= 1) return [clean.toLowerCase()];
+        while (parts.length > target) {
+          let idx = 0;
+          let best = Number.POSITIVE_INFINITY;
+          for (let i = 0; i < parts.length - 1; i++) {
+            const score = parts[i].length + parts[i + 1].length;
+            if (score < best) {
+              best = score;
+              idx = i;
+            }
+          }
+          parts.splice(idx, 2, parts[idx] + parts[idx + 1]);
+        }
+        while (parts.length < target) {
+          const i = parts.findIndex((p) => p.length >= 4);
+          if (i < 0) break;
+          const p = parts[i];
+          const cut = Math.max(1, Math.min(p.length - 1, Math.floor(p.length / 2)));
+          parts.splice(i, 1, p.slice(0, cut), p.slice(cut));
+        }
+        return parts;
+      }
+
+      function humanReadableUnits(token, rawUnits, syllables) {
+        // Always derive readable chunks from the original token so monitor labels stay word-like.
+        return splitTokenReadable(token, Number(syllables) || 0);
+      }
+
+      function playUiClickSound() {
+        try {
+          const a = uiClickAudio.cloneNode();
+          a.volume = 0.32;
+          void a.play();
+        } catch (_) {
+          // ignore playback failures
+        }
+      }
+
+      function updateTextLockUi() {
+        lockTextBtn.setAttribute('aria-pressed', textLocked ? 'true' : 'false');
+        lockTextBtn.setAttribute('aria-label', textLocked ? 'Text locked' : 'Text unlocked');
+        lockTextBtn.title = textLocked ? 'Text locked' : 'Text unlocked';
+        lockTextBtn.classList.toggle('btn-toggle-active', textLocked);
+        lockTextBtn.classList.toggle('unlocked', !textLocked);
+      }
+
+      function updateAmbienceUi() {
+        ambienceToggleBtn.classList.toggle('btn-toggle-active', ambienceOn);
+      }
+
+      function setAmbienceButtonVisual(on) {
+        if (!ambienceToggleVideo) return;
+        if (on) {
+          void ambienceToggleVideo.play().catch(() => {});
+        } else {
+          // Keep a non-black preview frame visible when paused.
+          if (Number.isFinite(ambienceToggleVideo.duration) && ambienceToggleVideo.duration > 1.2) {
+            ambienceToggleVideo.currentTime = Math.min(1.2, ambienceToggleVideo.duration - 0.05);
+          } else {
+            ambienceToggleVideo.currentTime = 0.8;
+          }
+          ambienceToggleVideo.pause();
+        }
+      }
+
+      if (ambienceToggleVideo) {
+        ambienceToggleVideo.addEventListener('loadedmetadata', () => {
+          if (!ambienceOn) {
+            try {
+              ambienceToggleVideo.currentTime = Math.min(1.2, (ambienceToggleVideo.duration || 1.2) - 0.05);
+            } catch (_) {
+              // ignore seek failures
+            }
+          }
+        });
+      }
+
+      function ensureAmbienceAudioChain() {
+        const ctx = ensureAudioContext();
+        if (!ctx) return null;
+        if (!ambienceGainNode) {
+          ambienceGainNode = ctx.createGain();
+          ambienceGainNode.gain.value = 0;
+          ambienceGainNode.connect(ctx.destination);
+        }
+        if (!ambienceSourceNode) {
+          ambienceSourceNode = ctx.createMediaElementSource(ambienceAudio);
+          ambienceSourceNode.connect(ambienceGainNode);
+        }
+        return ctx;
+      }
+
+      function setAmbienceVisual(on) {
+        setAmbienceButtonVisual(on);
+        if (!ambienceBgVideo) return;
+        if (on) {
+          ambienceBgVideo.currentTime = ambienceBgVideo.currentTime || 0;
+          void ambienceBgVideo.play().catch(() => {});
+          document.body.classList.add('ambience-active');
+          return;
+        }
+        document.body.classList.remove('ambience-active');
+        setTimeout(() => {
+          if (!ambienceOn) ambienceBgVideo.pause();
+        }, 950);
+      }
+
+      async function setAmbienceState(nextOn) {
+        const ctx = ensureAmbienceAudioChain();
+        if (!ctx || !ambienceGainNode) throw new Error('No audio context');
+        clearTimeout(ambiencePauseTimer);
+        const now = ctx.currentTime;
+        const g = ambienceGainNode.gain;
+        g.cancelScheduledValues(now);
+        g.setValueAtTime(g.value, now);
+
+        if (nextOn) {
+          await ambienceAudio.play();
+          setAmbienceVisual(true);
+          g.linearRampToValueAtTime(AMBIENCE_TARGET_GAIN, now + AMBIENCE_FADE_SEC);
+          return;
+        }
+        g.linearRampToValueAtTime(0, now + AMBIENCE_FADE_SEC);
+        setAmbienceVisual(false);
+        ambiencePauseTimer = setTimeout(() => {
+          if (!ambienceOn) ambienceAudio.pause();
+        }, Math.round((AMBIENCE_FADE_SEC + 0.08) * 1000));
+      }
+
+      function getUiState() {
+        return {
+          text: textArea.value || '',
+          tempo_bpm: tempoInput.value || '60',
+          key: keySelect.value || 'C',
+          mode: modeSelect.value || 'major',
+          voicing_mode: voicingSelect.value || 'closed',
+          octave_shift: octaveShiftInput.value || '0',
+          degree_shift: degreeShiftInput.value || '0',
+          bend_amount: bendInput.value || '0',
+          synth_volume: synthVolumeInput.value || '70',
+          port_name: portSelect.value || '',
+          loop_enabled: !!loopEnabledInput.checked,
+          loop_gap_ms: loopGapInput.value || '120',
+        };
+      }
+
+      function applyUiState(state) {
+        suppressHistory = true;
+        textArea.value = state.text ?? '';
+        tempoInput.value = state.tempo_bpm ?? '60';
+        keySelect.value = state.key ?? 'C';
+        modeSelect.value = state.mode ?? 'major';
+        voicingSelect.value = state.voicing_mode ?? 'closed';
+        octaveShiftInput.value = state.octave_shift ?? '0';
+        degreeShiftInput.value = state.degree_shift ?? '0';
+        setBend(state.bend_amount ?? 0);
+        setSynthVolume(state.synth_volume ?? 70);
+        if (state.port_name) portSelect.value = state.port_name;
+        loopEnabledInput.checked = !!state.loop_enabled;
+        loopGapInput.value = state.loop_gap_ms ?? '120';
+        updateShiftUnits();
+        suppressHistory = false;
+      }
+
+      function recordHistoryState(force = false) {
+        if (suppressHistory) return;
+        const state = getUiState();
+        const serialized = JSON.stringify(state);
+        if (!force && serialized === lastStateSerialized) return;
+        stateHistory.push(state);
+        if (stateHistory.length > 80) stateHistory.shift();
+        lastStateSerialized = serialized;
+        undoStateBtn.disabled = stateHistory.length <= 1;
+      }
+
+      function queueHistoryRecord() {
+        if (suppressHistory) return;
+        clearTimeout(historyTimer);
+        historyTimer = setTimeout(() => recordHistoryState(false), 240);
+      }
+
+      function stopAllBrowserVoices() {
+        activeVoices.forEach((voice) => {
+          try {
+            voice.gain.gain.cancelScheduledValues(0);
+            voice.gain.gain.setValueAtTime(0, audioCtx ? audioCtx.currentTime : 0);
+            voice.osc.stop();
+          } catch (_) {
+            // ignore stale voices
+          }
+        });
+        activeVoices.clear();
+      }
+
+      function updateSynthUi() {
+        const v = Math.round(Math.max(0, Math.min(100, Number(synthVolume) || 0)));
+        synthVolume = v;
+        synthVolumeInput.value = String(v);
+        synthDial.style.setProperty('--value', v);
+        synthDial.setAttribute('aria-valuenow', String(v));
+        const isOn = v > 0;
+        synthValue.textContent = isOn ? `${v}%` : 'OFF';
+      }
+
+      function setSynthVolume(v) {
+        synthVolume = Math.round(Math.max(0, Math.min(100, Number(v) || 0)));
+        updateSynthUi();
+        if (synthVolume <= 0) {
+          stopAllBrowserVoices();
+        } else {
+          ensureAudioContext();
+        }
+      }
+
+      function playBrowserNote(note, velocity = 100, startOffsetSec = 0) {
+        if (synthVolume <= 0) return;
+        const ctx = ensureAudioContext();
+        if (!ctx) return;
+        const n = Number(note);
+        if (!Number.isFinite(n)) return;
+
+        const now = ctx.currentTime;
+        const startAt = now + Math.max(0, Number(startOffsetSec) || 0);
+        const attackSec = 0.005;
+        const decaySec = 0.3;
+        const sustainLevel = 0.0;
+        const releaseSec = 0.005;
+        const velNorm = Math.max(0, Math.min(1, (Number(velocity) || 100) / 127));
+        const velCurve = Math.pow(velNorm, 1.35);
+        const volNorm = synthVolume / 100;
+        const level = Math.max(0.00005, Math.min(0.14, velCurve * 0.14 * volNorm));
+
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(midiToHz(n), startAt);
+        osc.detune.setValueAtTime(0, startAt);
+
+        const bendAmt = Math.max(0, Math.min(100, Number(bendInput.value || 0)));
+        if (bendAmt > 0) {
+          // Mirror the MIDI bend feel with a tiny pitch envelope in cents.
+          const maxCents = Math.max(2, bendAmt * 0.45); // 0..~45c
+          const dir = Math.random() < 0.5 ? -1 : 1;
+          const startCents = dir * maxCents * (0.42 + Math.random() * 0.22);
+          const midCents = -dir * maxCents * (0.18 + Math.random() * 0.16);
+          const envWindowSec = attackSec + decaySec;
+          const t1 = startAt + envWindowSec * 0.10;
+          const t2 = startAt + envWindowSec * 0.44;
+          const t3 = startAt + envWindowSec * 0.84;
+          osc.detune.linearRampToValueAtTime(startCents, t1);
+          osc.detune.linearRampToValueAtTime(midCents, t2);
+          osc.detune.linearRampToValueAtTime(0, t3);
+          osc.detune.linearRampToValueAtTime(0, startAt + envWindowSec + releaseSec);
+        }
+
+        const gain = ctx.createGain();
+        gain.gain.setValueAtTime(0, startAt);
+        gain.gain.linearRampToValueAtTime(level, startAt + attackSec);
+        gain.gain.linearRampToValueAtTime(level * sustainLevel, startAt + attackSec + decaySec);
+        gain.gain.setValueAtTime(level * sustainLevel, startAt + attackSec + decaySec);
+        gain.gain.linearRampToValueAtTime(0, startAt + attackSec + decaySec + releaseSec);
+
+        osc.connect(gain);
+        if (synthVerbBus && synthVerbBus.dryIn) {
+          gain.connect(synthVerbBus.dryIn);
+        }
+        if (synthVerbBus && synthVerbBus.input) {
+          gain.connect(synthVerbBus.input);
+        }
+
+        const id = ++voiceCounter;
+        activeVoices.set(id, { osc, gain, started: startAt });
+
+        osc.start(startAt);
+        osc.stop(startAt + attackSec + decaySec + releaseSec + 0.01);
+        osc.onended = () => {
+          activeVoices.delete(id);
+          try {
+            osc.disconnect();
+            gain.disconnect();
+          } catch (_) {
+            // disconnected already
+          }
+        };
+
+        if (activeVoices.size > MAX_BROWSER_VOICES) {
+          const oldestId = activeVoices.keys().next().value;
+          const oldest = activeVoices.get(oldestId);
+          if (oldest) {
+            try {
+              oldest.gain.gain.setValueAtTime(0, ctx.currentTime);
+              oldest.osc.stop(ctx.currentTime + 0.005);
+            } catch (_) {
+              // ignore
+            }
+          }
+        }
+      }
+
+      async function loadPorts() {
+        statusEl.textContent = 'Loading MIDI ports...';
+        try {
+          await ensureWebMidi();
+          refreshWebMidiOutputs();
+          const count = midiOutputMap.size;
+          statusEl.textContent = count
+            ? `Loaded ${count} MIDI port(s).`
+            : 'No MIDI output ports found. Browser synth still works.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Could not load MIDI ports.';
+        }
+      }
+
+      premiumUnlockBtn.addEventListener('click', async () => {
+        const key = (premiumKeyInput.value || '').trim();
+        if (!key) {
+          statusEl.textContent = 'Enter your premium key.';
+          return;
+        }
+        localStorage.setItem('text_to_midi_premium_key', key);
+        await refreshAccessState();
+        statusEl.textContent = premiumUnlocked ? 'Premium key unlocked.' : 'Invalid premium key.';
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        recordHistoryState(false);
+        button.disabled = true;
+        statusEl.textContent = 'Sending MIDI...';
+        notesMetaEl.textContent = 'Listening...';
+        const runId = playbackRunId + 1;
+        stopLocalPlayback();
+        playbackRunId = runId;
+
+        try {
+          await ensureWebMidi();
+          const loopOn = !!loopEnabledInput.checked;
+          let loopsCompleted = 0;
+          const loopGapMs = Math.max(0, Number(loopGapInput.value || 0));
+
+          do {
+            const events = composeEventsLocal();
+            const totalMs = playEventsWebMidi(events, runId);
+            loopsCompleted += 1;
+            if (!loopOn) {
+              break;
+            }
+            await new Promise((resolve) => {
+              scheduleTimer(totalMs + loopGapMs, resolve, runId);
+            });
+          } while (runId === playbackRunId && loopEnabledInput.checked);
+
+          if (runId !== playbackRunId) {
+            statusEl.textContent = 'MIDI stopped.';
+          } else {
+            const targetName = portSelect.value || 'Browser synth';
+            statusEl.textContent = loopEnabledInput.checked
+              ? `MIDI looping on ${targetName} (loops: ${loopsCompleted}).`
+              : `MIDI sent on ${targetName}.`;
+          }
+        } catch (err) {
+          statusEl.textContent = err.message;
+        } finally {
+          button.disabled = false;
+          setPaidUiState();
+        }
+      });
+
+      function varLen(v) {
+        let buffer = v & 0x7f;
+        while ((v >>= 7)) {
+          buffer <<= 8;
+          buffer |= ((v & 0x7f) | 0x80);
+        }
+        const out = [];
+        while (true) {
+          out.push(buffer & 0xff);
+          if (buffer & 0x80) buffer >>= 8; else break;
+        }
+        return out;
+      }
+
+      function buildMidiBlob(events, bpm) {
+        const ppq = 480;
+        const microsPerQuarter = Math.round(60000000 / Math.max(20, Math.min(300, bpm)));
+        const msgs = [];
+        msgs.push({ t: 0, b: [0xff, 0x51, 0x03, (microsPerQuarter >> 16) & 255, (microsPerQuarter >> 8) & 255, microsPerQuarter & 255] });
+        let sec = 0;
+        for (const ev of events) {
+          const chord = Array.isArray(ev.chord) ? ev.chord : [];
+          const vel = Math.max(1, Math.min(127, Number(ev.velocity || 96)));
+          const dur = Math.max(0.01, Number(ev.duration_sec || 0.2));
+          const arp = Array.isArray(ev.arpeggio_steps_sec) ? ev.arpeggio_steps_sec : [];
+          for (let i = 0; i < chord.length; i++) {
+            const n = Math.max(0, Math.min(127, Math.round(chord[i])));
+            const step = i === 0 ? 0 : Number(arp[i - 1] || 0);
+            const onSec = sec + step;
+            const offSec = onSec + dur;
+            msgs.push({ t: Math.max(0, Math.round((onSec * ppq * bpm) / 60)), b: [0x90, n, vel] });
+            msgs.push({ t: Math.max(0, Math.round((offSec * ppq * bpm) / 60)), b: [0x80, n, 0] });
+          }
+          sec += Math.max(0, Number(ev.advance_sec || 0));
+        }
+        msgs.sort((a, b) => a.t - b.t || a.b[0] - b.b[0]);
+        msgs.push({ t: msgs.length ? msgs[msgs.length - 1].t + 1 : 1, b: [0xff, 0x2f, 0x00] });
+        let prev = 0;
+        const track = [];
+        for (const m of msgs) {
+          const dt = Math.max(0, m.t - prev);
+          prev = m.t;
+          track.push(...varLen(dt), ...m.b);
+        }
+        const header = [0x4d,0x54,0x68,0x64, 0,0,0,6, 0,0, 0,1, (ppq>>8)&255, ppq&255];
+        const trkLen = track.length;
+        const trkHead = [0x4d,0x54,0x72,0x6b, (trkLen>>24)&255, (trkLen>>16)&255, (trkLen>>8)&255, trkLen&255];
+        return new Blob([new Uint8Array([...header, ...trkHead, ...track])], { type: 'audio/midi' });
+      }
+
+      saveMidiBtn.addEventListener('click', async () => {
+        saveMidiBtn.disabled = true;
+        statusEl.textContent = 'Saving MIDI file...';
+        try {
+          const events = composeEventsLocal();
+          const bpm = Math.max(20, Math.min(200, Number(tempoInput.value || 60)));
+          const blob = buildMidiBlob(events, bpm);
+          const base = (textArea.value || 'text_to_midi').replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'text_to_midi';
+          const filename = `${base}.mid`;
+
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+
+          statusEl.textContent = `Saved ${filename}`;
+        } catch (err) {
+          statusEl.textContent = err.message || 'Save failed.';
+        } finally {
+          saveMidiBtn.disabled = false;
+          setPaidUiState();
+        }
+      });
+
+      refreshPortsBtn.addEventListener('click', loadPorts);
+      randomizeAllBtn.addEventListener('click', async () => {
+        recordHistoryState(false);
+        statusEl.textContent = 'Randomizing...';
+        try {
+          const payload = {
+            text: TEXT_POOL[Math.floor(Math.random() * TEXT_POOL.length)],
+            tempo_bpm: Math.max(20, Math.min(200, Math.round(20 + Math.pow(Math.random(), 1.9) * 180))),
+            key: keySelect.options[Math.floor(Math.random() * keySelect.options.length)].value,
+            mode: modeSelect.options[Math.floor(Math.random() * modeSelect.options.length)].value
+          };
+          if (!textLocked) {
+            textArea.value = payload.text || '';
+          }
+          tempoInput.value = payload.tempo_bpm ?? 60;
+          keySelect.value = payload.key || 'C';
+          modeSelect.value = payload.mode || 'major';
+          voicingSelect.value = Math.random() < 0.5 ? 'closed' : 'open';
+          octaveShiftInput.value = String(Math.floor(Math.random() * 3) - 1);
+          degreeShiftInput.value = String(Math.floor(Math.random() * 9) - 4);
+          updateShiftUnits();
+          setBend(Math.floor(Math.random() * 56));
+          if (payload.port_name) {
+            const hasPort = Array.from(portSelect.options).some((o) => o.value === payload.port_name);
+            if (!hasPort) {
+              await loadPorts();
+            }
+            portSelect.value = payload.port_name;
+          }
+          statusEl.textContent = textLocked ? 'Randomized settings (text locked).' : 'Randomized settings and text.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Randomize failed.';
+        }
+      });
+
+      randomizeTextBtn.addEventListener('click', async () => {
+        recordHistoryState(false);
+        statusEl.textContent = 'Randomizing text...';
+        try {
+          textArea.value = TEXT_POOL[Math.floor(Math.random() * TEXT_POOL.length)];
+          statusEl.textContent = 'Randomized text.';
+        } catch (err) {
+          statusEl.textContent = err.message || 'Randomize text failed.';
+        }
+      });
+      lockTextBtn.addEventListener('click', () => {
+        textLocked = !textLocked;
+        updateTextLockUi();
+        statusEl.textContent = textLocked ? 'Text lock enabled.' : 'Text lock disabled.';
+        try {
+          const a = (textLocked ? lockOnAudio : lockOffAudio).cloneNode();
+          a.volume = 0.38;
+          void a.play();
+        } catch (_) {
+          // ignore playback failures
+        }
+      });
+      ambienceToggleBtn.addEventListener('click', async () => {
+        ambienceOn = !ambienceOn;
+        updateAmbienceUi();
+        try {
+          await setAmbienceState(ambienceOn);
+          statusEl.textContent = ambienceOn ? 'Ambience enabled.' : 'Ambience disabled.';
+        } catch (_) {
+          ambienceOn = false;
+          updateAmbienceUi();
+          setAmbienceVisual(false);
+          statusEl.textContent = 'Could not start ambience audio.';
+        }
+      });
+      resetShiftsBtn.addEventListener('click', () => {
+        recordHistoryState(false);
+        octaveShiftInput.value = '0';
+        degreeShiftInput.value = '0';
+        updateShiftUnits();
+      });
+      async function requestStop(silent = false) {
+        stopLocalPlayback();
+        if (!silent) statusEl.textContent = 'Stopped MIDI.';
+      }
+
+      stopMidiBtn.addEventListener('click', async () => {
+        await requestStop(false);
+      });
+
+      undoStateBtn.addEventListener('click', () => {
+        if (stateHistory.length <= 1) {
+          statusEl.textContent = 'Nothing to undo.';
+          undoStateBtn.disabled = true;
+          return;
+        }
+        stateHistory.pop(); // remove current
+        const prev = stateHistory[stateHistory.length - 1];
+        applyUiState(prev);
+        lastStateSerialized = JSON.stringify(prev);
+        undoStateBtn.disabled = stateHistory.length <= 1;
+        statusEl.textContent = 'Restored previous text/settings.';
+      });
+
+      textArea.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          form.requestSubmit();
+        }
+      });
+
+      function updateBendLabel() {
+        const v = Number(bendInput.value || 0);
+        bendValue.textContent = v === 0 ? 'OFF' : `BEND ${v}%`;
+      }
+
+      function setBend(v) {
+        const clamped = Math.round(Math.max(0, Math.min(100, Number(v) || 0)));
+        bendInput.value = String(clamped);
+        bendDial.style.setProperty('--value', clamped);
+        bendDial.setAttribute('aria-valuenow', String(clamped));
+        updateBendLabel();
+      }
+
+      function formatSignedUnit(value, unit) {
+        const n = Math.round(Number(value) || 0);
+        const sign = n > 0 ? '+' : '';
+        return `${sign}${n} ${unit}`;
+      }
+
+      function updateShiftUnits() {
+        octaveUnit.textContent = formatSignedUnit(octaveShiftInput.value, 'OCT');
+        degreeUnit.textContent = formatSignedUnit(degreeShiftInput.value, 'SD');
+      }
+
+      function appendNoteGroup(group) {
+        const row = document.createElement('div');
+        row.className = 'note-row';
+        const notes = group.map((g) => g.name).join(' · ');
+        const token = (group.find((g) => g.token)?.token || '').trim();
+        const unitText = (group.find((g) => (g.units || '').length)?.units || '').trim();
+        const mapText = token
+          ? `${token}${unitText ? ` [${unitText}]` : ''}`
+          : (unitText ? `[${unitText}]` : '');
+        row.innerHTML = `<span class="note-name">${notes}</span>${mapText ? `<span class="unit-readout">← ${mapText}</span>` : ''}`;
+        noteFeedEl.appendChild(row);
+        if (noteFeedEl.childElementCount > 240) {
+          noteFeedEl.removeChild(noteFeedEl.firstChild);
+        }
+        noteFeedEl.scrollTop = noteFeedEl.scrollHeight;
+      }
+
+      async function pollLiveNotes() {
+        // Live monitor is now fed directly from browser-side playback events.
+      }
+
+      async function primeLiveNotesCursor() {
+        noteFeedEl.innerHTML = '';
+        notesMetaEl.textContent = 'Waiting for MIDI...';
+        noteAfterId = 0;
+        liveNotesBootstrapped = true;
+      }
+
+      async function clearNoteConsole() {
+        noteFeedEl.innerHTML = '';
+        noteAfterId = 0;
+        notesMetaEl.textContent = 'Cleared. Waiting for new MIDI...';
+      }
+
+      function clampToInputRange(inputEl, nextValue) {
+        const min = inputEl.min !== '' ? Number(inputEl.min) : Number.NEGATIVE_INFINITY;
+        const max = inputEl.max !== '' ? Number(inputEl.max) : Number.POSITIVE_INFINITY;
+        return Math.max(min, Math.min(max, nextValue));
+      }
+
+      let dialDragging = false;
+      let dialStartY = 0;
+      let dialStartVal = 0;
+      bendDial.addEventListener('mousedown', (e) => {
+        dialDragging = true;
+        dialStartY = e.clientY;
+        dialStartVal = Number(bendInput.value || 0);
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!dialDragging) return;
+        const delta = (dialStartY - e.clientY) * 0.6;
+        setBend(dialStartVal + delta);
+      });
+      window.addEventListener('mouseup', () => { dialDragging = false; });
+      bendDial.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 3 : -3;
+        setBend(Number(bendInput.value || 0) + delta);
+      });
+      bendDial.addEventListener('keydown', (e) => {
+        const cur = Number(bendInput.value || 0);
+        if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setBend(cur + 2); }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setBend(cur - 2); }
+      });
+      octaveShiftInput.addEventListener('input', () => { updateShiftUnits(); });
+      degreeShiftInput.addEventListener('input', () => { updateShiftUnits(); });
+      loopEnabledInput.addEventListener('change', async () => {
+        if (!loopEnabledInput.checked) {
+          await requestStop(true);
+          statusEl.textContent = 'Loop disabled. Stopping current MIDI send...';
+        }
+      });
+      [textArea, tempoInput, keySelect, modeSelect, voicingSelect, octaveShiftInput, degreeShiftInput, bendInput, synthVolumeInput, portSelect, loopEnabledInput, loopGapInput].forEach((el) => {
+        el.addEventListener('input', queueHistoryRecord);
+        el.addEventListener('change', queueHistoryRecord);
+      });
+      stepButtons.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const targetId = btn.getAttribute('data-target');
+          const step = Number(btn.getAttribute('data-step') || 1);
+          const inputEl = document.getElementById(targetId);
+          if (!inputEl) return;
+          const current = Number(inputEl.value || 0);
+          const next = clampToInputRange(inputEl, current + step);
+          inputEl.value = String(next);
+          if (inputEl === octaveShiftInput || inputEl === degreeShiftInput) updateShiftUnits();
+          inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+          inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      });
+      // UI button click SFX
+      document.querySelectorAll('button').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (btn === lockTextBtn) return;
+          playUiClickSound();
+        });
+        btn.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            if (btn === lockTextBtn) return;
+            playUiClickSound();
+          }
+        });
+      });
+      if (notesSummary) {
+        notesSummary.addEventListener('click', () => {
+          playUiClickSound();
+        });
+      }
+      if (accessSummary) {
+        accessSummary.addEventListener('click', () => {
+          playUiClickSound();
+        });
+      }
+      clearNotesBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        clearNoteConsole();
+      });
+      let synthDragging = false;
+      let synthStartY = 0;
+      let synthStartVal = 0;
+      synthDial.addEventListener('mousedown', (e) => {
+        synthDragging = true;
+        synthStartY = e.clientY;
+        synthStartVal = Number(synthVolumeInput.value || 0);
+      });
+      window.addEventListener('mousemove', (e) => {
+        if (!synthDragging) return;
+        const delta = (synthStartY - e.clientY) * 0.6;
+        setSynthVolume(synthStartVal + delta);
+      });
+      window.addEventListener('mouseup', () => { synthDragging = false; });
+      synthDial.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 3 : -3;
+        setSynthVolume(Number(synthVolumeInput.value || 0) + delta);
+      });
+      synthDial.addEventListener('keydown', (e) => {
+        const cur = Number(synthVolumeInput.value || 0);
+        if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setSynthVolume(cur + 2); }
+        if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setSynthVolume(cur - 2); }
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          setSynthVolume(cur > 0 ? 0 : 70);
+        }
+      });
+
+      setBend(0);
+      setSynthVolume(70);
+      premiumKeyInput.value = localStorage.getItem('text_to_midi_premium_key') || '';
+      updateTextLockUi();
+      updateAmbienceUi();
+      setAmbienceButtonVisual(false);
+      updateShiftUnits();
+      recordHistoryState(true);
+      refreshAccessState();
+      loadPorts();
+      primeLiveNotesCursor().finally(() => {
+        setInterval(pollLiveNotes, 90);
+      });
+      // Safety: if a previous loop got stuck, stop it when this page boots.
+      requestStop(true);
+      ['mousedown', 'keydown', 'touchstart'].forEach((evtName) => {
+        window.addEventListener(evtName, () => { ensureAudioContext(); }, { once: true, passive: true });
+      });
+
+      window.addEventListener('beforeunload', () => {
+        stopAllBrowserVoices();
+        ambienceOn = false;
+        if (ambienceGainNode && audioCtx) {
+          const now = audioCtx.currentTime;
+          ambienceGainNode.gain.cancelScheduledValues(now);
+          ambienceGainNode.gain.setValueAtTime(0, now);
+        }
+        ambienceAudio.pause();
+        if (ambienceBgVideo) ambienceBgVideo.pause();
+        document.body.classList.remove('ambience-active');
+        stopLocalPlayback();
+      });
+      window.addEventListener('pagehide', () => {
+        stopAllBrowserVoices();
+        stopLocalPlayback();
+      });
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+          stopLocalPlayback();
+        }
+      });
+    </script>
+  </body>
+</html>
