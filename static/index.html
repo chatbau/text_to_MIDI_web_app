@@ -34,11 +34,17 @@
       body.ambience-active #ambienceBgVideo { opacity: 1; }
       .wrap { max-width: 860px; margin: 30px auto; padding: 16px; position: relative; z-index: 2; }
       .card { background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:18px; box-shadow: 0 14px 36px rgba(0,0,0,.45); position: relative; z-index: 2; }
-      h1 { margin:0 0 3px; font-size:26px; letter-spacing:.5px; color:#f5efe5; font-family:"Degular Black","Degular","SF Pro Display","Helvetica Neue",sans-serif; font-weight:900; }
+      h1 { margin:0 0 3px; font-size:26px; letter-spacing:.5px; color:#f5efe5; font-family: inherit; font-weight:900; }
       .title-midi { color: var(--accent); }
       .title-underscore { color:#ffffff; }
       p { margin:0 0 6px; color: var(--muted); line-height:1.15; }
       textarea, input, select, button { width:100%; box-sizing:border-box; border-radius:2px; border:1px solid var(--line); padding:10px 12px; font-size:14px; font-family: inherit; background:#090909; color:var(--ink); }
+      textarea:focus,
+      textarea:focus-visible {
+        outline: none;
+        box-shadow: none;
+        border-color: var(--line);
+      }
       input, select, button { min-height: 44px; }
       select {
         appearance: none;
@@ -335,6 +341,7 @@
       .access-flyout .access-panel > summary::-webkit-details-marker { display:none; }
       .access-flyout .access-panel:not([open]) {
         width: 104px;
+        margin-left: auto;
         border: 0;
         padding: 0;
         background: transparent;
@@ -651,23 +658,17 @@
       </div>
       <aside class="access-flyout">
         <details class="access-panel" open>
-          <summary>Account Access</summary>
+          <summary>Premium Access</summary>
           <div class="access-body">
             <div class="access-bar">
               <div class="access-row">
-                <input id="authEmail" type="email" placeholder="Email" autocomplete="email" />
-                <input id="authPassword" type="password" placeholder="Password (min 8 chars)" autocomplete="current-password" />
-                <input id="authPasswordConfirm" type="password" placeholder="Confirm password (for new account)" autocomplete="new-password" />
+                <input id="premiumKey" type="password" placeholder="Premium key" autocomplete="off" />
               </div>
               <div class="access-actions">
-                <button id="authContinue" class="btn-secondary" type="button">Continue</button>
-                <button id="authLogout" class="btn-secondary" type="button">Logout</button>
-                <button id="stripeCheckout" class="btn-secondary" type="button">Pay with Stripe</button>
-                <button id="patreonConnect" class="btn-secondary" type="button">Connect Patreon</button>
-                <button id="billingManage" class="btn-secondary" type="button">Manage Billing</button>
+                <button id="premiumUnlock" class="btn-secondary" type="button">Unlock</button>
               </div>
-              <div class="access-help">Use <strong>Continue</strong> to sign in. If account does not exist, it will create one (password + confirm must match).</div>
-              <div id="accessStatus" class="access-status">Checking account status...</div>
+              <div class="access-help">Patreon handles payment. Enter your shared premium key to unlock the app.</div>
+              <div id="accessStatus" class="access-status">Checking premium access...</div>
             </div>
           </div>
         </details>
@@ -728,14 +729,8 @@
       const stepButtons = document.querySelectorAll('.step-btn');
       const loopEnabledInput = document.getElementById('loop_enabled');
       const loopGapInput = document.getElementById('loop_gap_ms');
-      const authEmailInput = document.getElementById('authEmail');
-      const authPasswordInput = document.getElementById('authPassword');
-      const authPasswordConfirmInput = document.getElementById('authPasswordConfirm');
-      const authContinueBtn = document.getElementById('authContinue');
-      const authLogoutBtn = document.getElementById('authLogout');
-      const stripeCheckoutBtn = document.getElementById('stripeCheckout');
-      const patreonConnectBtn = document.getElementById('patreonConnect');
-      const billingManageBtn = document.getElementById('billingManage');
+      const premiumKeyInput = document.getElementById('premiumKey');
+      const premiumUnlockBtn = document.getElementById('premiumUnlock');
       const accessStatusEl = document.getElementById('accessStatus');
       const uiClickAudio = new Audio('/ui_click.wav?v=20260304-082617');
       uiClickAudio.preload = 'auto';
@@ -749,7 +744,6 @@
       const lockOffAudio = new Audio('/unlock_sound.wav');
       lockOnAudio.preload = 'auto';
       lockOffAudio.preload = 'auto';
-      let isSending = false;
       let noteAfterId = 0;
       let liveNotesBootstrapped = false;
       let synthVolume = 70;
@@ -770,36 +764,41 @@
       let voiceCounter = 0;
       const activeVoices = new Map();
       const MAX_BROWSER_VOICES = 32;
-      let currentAccount = { logged_in: false, paid_access: false };
-
-      function setPaidUiState() {
-        const paid = !!currentAccount.paid_access;
-        button.disabled = !paid;
-        saveMidiBtn.disabled = !paid;
-        stopMidiBtn.disabled = !paid;
-      }
-
-      function setAccessActionVisibility() {
-        const logged = !!currentAccount.logged_in;
-        const paid = !!currentAccount.paid_access;
-        authContinueBtn.style.display = logged ? 'none' : '';
-        authLogoutBtn.style.display = logged ? '' : 'none';
-        stripeCheckoutBtn.style.display = (logged && !paid) ? '' : 'none';
-        patreonConnectBtn.style.display = (logged && !paid) ? '' : 'none';
-        billingManageBtn.style.display = (logged && paid) ? '' : 'none';
-        authEmailInput.disabled = logged;
-        authPasswordInput.disabled = logged;
-        authPasswordConfirmInput.disabled = logged;
-      }
+      let premiumUnlocked = false;
+      let premiumRequired = true;
+      let midiAccess = null;
+      let midiOutputMap = new Map();
+      let playbackRunId = 0;
+      let scheduledTimers = [];
+      let soundingNotes = new Set();
 
       function setAccessStatus(text) {
         accessStatusEl.textContent = text;
       }
 
+
+      function getPremiumKey() {
+        return (premiumKeyInput?.value || localStorage.getItem('text_to_midi_premium_key') || '').trim();
+      }
+
+      function getPremiumHeaders() {
+        const key = getPremiumKey();
+        return key ? { 'X-Premium-Key': key } : {};
+      }
+
+      function setPaidUiState() {
+        const ok = !premiumRequired || premiumUnlocked;
+        button.disabled = !ok;
+        saveMidiBtn.disabled = !ok;
+        stopMidiBtn.disabled = !ok;
+      }
+
       async function apiFormPost(url, bodyObj = {}) {
         const data = new FormData();
         Object.entries(bodyObj).forEach(([k, v]) => data.append(k, String(v ?? '')));
-        const res = await fetch(url, { method: 'POST', body: data });
+        const key = getPremiumKey();
+        if (key) data.set('premium_key', key);
+        const res = await fetch(url, { method: 'POST', body: data, headers: getPremiumHeaders() });
         let payload = {};
         try {
           payload = await res.json();
@@ -813,47 +812,170 @@
         return payload;
       }
 
-      async function refreshAccessState() {
-        try {
-          const res = await fetch('/api/auth/me');
-          const payload = await res.json();
-          currentAccount = payload.user || { logged_in: false, paid_access: false };
-          const params = new URLSearchParams(window.location.search);
-          const billing = params.get('billing');
-          const sessionId = params.get('session_id');
-          if (currentAccount.logged_in && !currentAccount.paid_access) {
+      async function ensureWebMidi() {
+        if (!navigator.requestMIDIAccess) {
+          throw new Error('Web MIDI is not supported in this browser. Use Chrome/Edge.');
+        }
+        if (!midiAccess) {
+          midiAccess = await navigator.requestMIDIAccess({ sysex: false });
+          midiAccess.onstatechange = () => {
+            refreshWebMidiOutputs();
+          };
+        }
+        return midiAccess;
+      }
+
+      function refreshWebMidiOutputs() {
+        midiOutputMap = new Map();
+        portSelect.innerHTML = '';
+        if (!midiAccess) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'Click Refresh Ports';
+          portSelect.appendChild(opt);
+          return;
+        }
+        const outputs = Array.from(midiAccess.outputs.values());
+        for (const out of outputs) {
+          midiOutputMap.set(out.name, out);
+          const opt = document.createElement('option');
+          opt.value = out.name;
+          opt.textContent = out.name;
+          portSelect.appendChild(opt);
+        }
+        if (!outputs.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No MIDI ports found';
+          portSelect.appendChild(opt);
+        } else if (!midiOutputMap.has(portSelect.value)) {
+          portSelect.value = outputs[0].name;
+        }
+      }
+
+      function stopLocalPlayback() {
+        playbackRunId += 1;
+        for (const t of scheduledTimers) clearTimeout(t);
+        scheduledTimers = [];
+        stopAllBrowserVoices();
+        if (midiAccess) {
+          for (const out of midiAccess.outputs.values()) {
             try {
-              if (billing === 'success' && sessionId) {
-                const confirmRes = await fetch(`/api/billing/stripe/confirm?session_id=${encodeURIComponent(sessionId)}`);
-                const confirmPayload = await confirmRes.json();
-                if (confirmRes.ok && confirmPayload.user) {
-                  currentAccount = confirmPayload.user;
-                }
-              } else {
-                const syncRes = await fetch('/api/billing/stripe/sync', { method: 'POST' });
-                const syncPayload = await syncRes.json();
-                if (syncRes.ok && syncPayload.user) {
-                  currentAccount = syncPayload.user;
-                }
+              for (let ch = 0; ch < 16; ch++) {
+                out.send([0xb0 + ch, 123, 0]); // all notes off
+                out.send([0xe0 + ch, 0, 64]);  // pitch bend center
               }
             } catch (_) {
-              // best-effort sync
+              // ignore per-port send errors
             }
           }
-          if (!currentAccount.logged_in) {
-            setAccessStatus('Not logged in.');
-          } else if (!currentAccount.paid_access) {
-            setAccessStatus(`Logged in as ${currentAccount.email}. No paid access yet.`);
-          } else {
-            const src = currentAccount.entitlement_source || 'paid';
-            setAccessStatus(`Paid access active (${src}) as ${currentAccount.email}.`);
+        }
+        soundingNotes.clear();
+      }
+
+      function scheduleTimer(ms, fn, runId) {
+        const id = setTimeout(() => {
+          if (runId !== playbackRunId) return;
+          fn();
+        }, Math.max(0, Math.round(ms)));
+        scheduledTimers.push(id);
+      }
+
+      async function fetchComposedEvents() {
+        const data = new FormData(form);
+        const res = await fetch('/api/compose-events', { method: 'POST', body: data, headers: getPremiumHeaders() });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ detail: 'Request failed.' }));
+          throw new Error(err.detail || 'Failed to compose MIDI events.');
+        }
+        const payload = await res.json();
+        return payload.events || [];
+      }
+
+      function appendMonitorGroupFromEvent(event, noteNames) {
+        const token = String(event.source_token || '');
+        const units = humanReadableUnits(token, event.source_units, Number(event.source_syllables || 0)).join('-');
+        const group = noteNames.map((name) => ({ name, token, units }));
+        if (group.length) appendNoteGroup(group);
+      }
+
+      function playEventsWebMidi(events, runId) {
+        const selected = portSelect.value || '';
+        const out = selected ? midiOutputMap.get(selected) : null;
+        const baseMs = performance.now();
+        let cursorSec = 0;
+
+        for (const ev of events) {
+          const chord = Array.isArray(ev.chord) ? ev.chord.map((n) => Number(n)).filter(Number.isFinite) : [];
+          const velocity = Math.max(1, Math.min(127, Number(ev.velocity || 100)));
+          const durationSec = Math.max(0, Number(ev.duration_sec || 0));
+          const advanceSec = Math.max(0, Number(ev.advance_sec || 0));
+          const arp = Array.isArray(ev.arpeggio_steps_sec) ? ev.arpeggio_steps_sec.map((x) => Number(x) || 0) : [];
+          const bendCurve = Array.isArray(ev.bend_curve) ? ev.bend_curve : [];
+          const eventStartMs = baseMs + (cursorSec * 1000);
+
+          if (chord.length) {
+            const noteNames = chord.map((n) => formatNoteNameForKey(n, keySelect.value));
+            appendMonitorGroupFromEvent(ev, noteNames);
           }
+
+          chord.forEach((note, i) => {
+            const stepSec = i === 0 ? 0 : (arp[i - 1] || 0);
+            const onMs = eventStartMs + (stepSec * 1000);
+            const offMs = onMs + (durationSec * 1000);
+            const noteInt = Math.max(0, Math.min(127, Math.round(note)));
+
+            scheduleTimer(onMs - performance.now(), () => {
+              if (out) {
+                out.send([0x90, noteInt, velocity]);
+                soundingNotes.add(noteInt);
+              }
+              playBrowserNote(noteInt, velocity, 0);
+            }, runId);
+
+            if (out && bendCurve.length) {
+              for (const pair of bendCurve) {
+                const frac = Math.max(0, Math.min(1, Number(pair?.[0] || 0)));
+                const bendVal = Math.max(-8192, Math.min(8191, Number(pair?.[1] || 0)));
+                const raw = bendVal + 8192;
+                const lsb = raw & 0x7f;
+                const msb = (raw >> 7) & 0x7f;
+                scheduleTimer((onMs - performance.now()) + (frac * durationSec * 1000), () => {
+                  out.send([0xe0, lsb, msb]);
+                }, runId);
+              }
+            }
+
+            scheduleTimer(offMs - performance.now(), () => {
+              if (out) {
+                out.send([0x80, noteInt, 0]);
+                soundingNotes.delete(noteInt);
+              }
+            }, runId);
+          });
+
+          cursorSec += advanceSec;
+        }
+
+        const totalMs = Math.max(0, Math.round(cursorSec * 1000));
+        return totalMs;
+      }
+
+      async function refreshAccessState() {
+        try {
+          const res = await fetch('/api/access/check', { headers: getPremiumHeaders() });
+          const payload = await res.json();
+          premiumRequired = !!payload.premium_required;
+          premiumUnlocked = !!payload.unlocked;
+          if (!premiumRequired) setAccessStatus('Premium key is not required on this deployment.');
+          else if (premiumUnlocked) setAccessStatus('Premium access unlocked.');
+          else setAccessStatus('Premium key required.');
         } catch (_) {
-          currentAccount = { logged_in: false, paid_access: false };
-          setAccessStatus('Could not load account status.');
+          premiumRequired = true;
+          premiumUnlocked = false;
+          setAccessStatus('Could not verify premium access.');
         }
         setPaidUiState();
-        setAccessActionVisibility();
       }
 
       function ensureAudioContext() {
@@ -877,17 +999,46 @@
           dryIn.connect(master);
 
           const input = audioCtx.createGain();
-          const delay = audioCtx.createDelay(0.6);
-          const fb = audioCtx.createGain();
-          const wet = audioCtx.createGain();
-          delay.delayTime.value = 0.11;
-          fb.gain.value = 0.34;
-          wet.gain.value = 0.42;
-          input.connect(delay);
-          delay.connect(fb);
-          fb.connect(delay);
-          delay.connect(wet);
-          wet.connect(master);
+
+          // Hybrid-like reverb: early reflections (delay network) + late tail (convolution).
+          const erTap1 = audioCtx.createDelay(0.12);
+          const erTap2 = audioCtx.createDelay(0.12);
+          const erTap3 = audioCtx.createDelay(0.16);
+          const erTap4 = audioCtx.createDelay(0.18);
+          const erMix = audioCtx.createGain();
+          const erPanL = audioCtx.createStereoPanner();
+          const erPanR = audioCtx.createStereoPanner();
+          erTap1.delayTime.value = 0.017;
+          erTap2.delayTime.value = 0.029;
+          erTap3.delayTime.value = 0.041;
+          erTap4.delayTime.value = 0.057;
+          erMix.gain.value = 0.28;
+          erPanL.pan.value = -0.45;
+          erPanR.pan.value = 0.45;
+
+          input.connect(erTap1);
+          input.connect(erTap2);
+          input.connect(erTap3);
+          input.connect(erTap4);
+          erTap1.connect(erPanL);
+          erTap3.connect(erPanL);
+          erTap2.connect(erPanR);
+          erTap4.connect(erPanR);
+          erPanL.connect(erMix);
+          erPanR.connect(erMix);
+          erMix.connect(master);
+
+          const convolver = audioCtx.createConvolver();
+          const tailMix = audioCtx.createGain();
+          const tailPan = audioCtx.createStereoPanner();
+          tailMix.gain.value = 0.52;
+          tailPan.pan.value = 0.12;
+          convolver.buffer = createHybridIrBuffer(audioCtx, 2.8, 2.6);
+          input.connect(convolver);
+          convolver.connect(tailPan);
+          tailPan.connect(tailMix);
+          tailMix.connect(master);
+
           synthVerbBus = { input, dryIn };
           synthOutputBus = { master, limiter };
         }
@@ -895,6 +1046,21 @@
           audioCtx.resume().catch(() => {});
         }
         return audioCtx;
+      }
+
+      function createHybridIrBuffer(ctx, seconds = 2.6, decay = 2.4) {
+        const length = Math.max(1, Math.floor(ctx.sampleRate * seconds));
+        const ir = ctx.createBuffer(2, length, ctx.sampleRate);
+        for (let ch = 0; ch < 2; ch++) {
+          const data = ir.getChannelData(ch);
+          for (let i = 0; i < length; i++) {
+            const t = i / length;
+            const env = Math.pow(1 - t, decay);
+            const color = 0.65 + 0.35 * Math.sin((i / 97) + (ch * 0.8));
+            data[i] = ((Math.random() * 2 - 1) * env * color) * 0.9;
+          }
+        }
+        return ir;
       }
 
       function midiToHz(note) {
@@ -915,6 +1081,43 @@
         const octave = Math.floor(Math.round(n) / 12) - 1;
         const names = prefersFlatsForKey(key) ? flatNames : sharpNames;
         return `${names[pc]}${octave}`;
+      }
+
+      function splitTokenReadable(token, syllableCount = 0) {
+        const raw = String(token || '').trim();
+        if (!raw) return [];
+        const clean = raw.replace(/[^A-Za-z]/g, '');
+        if (!clean) return [];
+        const target = Math.max(1, Number(syllableCount) || 0);
+        if (target <= 1) return [clean.toLowerCase()];
+        const groups = clean.match(/[^aeiouyAEIOUY]*[aeiouyAEIOUY]+(?:[^aeiouyAEIOUY](?=[^aeiouyAEIOUY]|$))?/g) || [clean];
+        let parts = groups.map((g) => g.toLowerCase()).filter(Boolean);
+        if (parts.length <= 1) return [clean.toLowerCase()];
+        while (parts.length > target) {
+          let idx = 0;
+          let best = Number.POSITIVE_INFINITY;
+          for (let i = 0; i < parts.length - 1; i++) {
+            const score = parts[i].length + parts[i + 1].length;
+            if (score < best) {
+              best = score;
+              idx = i;
+            }
+          }
+          parts.splice(idx, 2, parts[idx] + parts[idx + 1]);
+        }
+        while (parts.length < target) {
+          const i = parts.findIndex((p) => p.length >= 4);
+          if (i < 0) break;
+          const p = parts[i];
+          const cut = Math.max(1, Math.min(p.length - 1, Math.floor(p.length / 2)));
+          parts.splice(i, 1, p.slice(0, cut), p.slice(cut));
+        }
+        return parts;
+      }
+
+      function humanReadableUnits(token, rawUnits, syllables) {
+        // Always derive readable chunks from the original token so monitor labels stay word-like.
+        return splitTokenReadable(token, Number(syllables) || 0);
       }
 
       function playUiClickSound() {
@@ -1051,7 +1254,6 @@
         loopGapInput.value = state.loop_gap_ms ?? '120';
         updateShiftUnits();
         suppressHistory = false;
-        if (isSending) pushLiveSettings();
       }
 
       function recordHistoryState(force = false) {
@@ -1120,7 +1322,7 @@
         const velNorm = Math.max(0, Math.min(1, (Number(velocity) || 100) / 127));
         const velCurve = Math.pow(velNorm, 1.35);
         const volNorm = synthVolume / 100;
-        const level = Math.max(0.00005, Math.min(0.09, velCurve * 0.09 * volNorm));
+        const level = Math.max(0.00005, Math.min(0.14, velCurve * 0.14 * volNorm));
 
         const osc = ctx.createOscillator();
         osc.type = 'sine';
@@ -1191,106 +1393,26 @@
       async function loadPorts() {
         statusEl.textContent = 'Loading MIDI ports...';
         try {
-          const res = await fetch('/api/ports');
-          if (!res.ok) throw new Error('Could not load MIDI ports.');
-          const data = await res.json();
-          const ports = data.ports || [];
-          portSelect.innerHTML = '';
-          if (!ports.length) {
-            const opt = document.createElement('option');
-            opt.value = '';
-            opt.textContent = 'No MIDI ports found';
-            portSelect.appendChild(opt);
-            statusEl.textContent = 'No MIDI output ports found.';
-            return;
-          }
-          for (const port of ports) {
-            const opt = document.createElement('option');
-            opt.value = port;
-            opt.textContent = port;
-            portSelect.appendChild(opt);
-          }
-          statusEl.textContent = `Loaded ${ports.length} MIDI port(s).`;
+          await ensureWebMidi();
+          refreshWebMidiOutputs();
+          const count = midiOutputMap.size;
+          statusEl.textContent = count
+            ? `Loaded ${count} MIDI port(s).`
+            : 'No MIDI output ports found. Browser synth still works.';
         } catch (err) {
           statusEl.textContent = err.message || 'Could not load MIDI ports.';
         }
       }
 
-      authContinueBtn.addEventListener('click', async () => {
-        try {
-          const email = (authEmailInput.value || '').trim();
-          const password = authPasswordInput.value || '';
-          const confirm = authPasswordConfirmInput.value || '';
-          if (!email || !password) throw new Error('Enter email and password.');
-          let didLogin = false;
-          try {
-            await apiFormPost('/api/auth/login', { email, password });
-            didLogin = true;
-          } catch (loginErr) {
-            if (!confirm) {
-              throw new Error('Account not found or wrong password. For new account, fill Confirm password and continue.');
-            }
-            if (password !== confirm) {
-              throw new Error('Password and confirm password must match.');
-            }
-            await apiFormPost('/api/auth/register', { email, password });
-          }
-          authPasswordInput.value = '';
-          authPasswordConfirmInput.value = '';
-          await refreshAccessState();
-          statusEl.textContent = didLogin ? 'Signed in.' : 'Account created and signed in.';
-        } catch (err) {
-          statusEl.textContent = err.message || 'Could not continue.';
+      premiumUnlockBtn.addEventListener('click', async () => {
+        const key = (premiumKeyInput.value || '').trim();
+        if (!key) {
+          statusEl.textContent = 'Enter your premium key.';
+          return;
         }
-      });
-
-      authLogoutBtn.addEventListener('click', async () => {
-        try {
-          await apiFormPost('/api/auth/logout');
-          authEmailInput.value = '';
-          authPasswordInput.value = '';
-          authPasswordConfirmInput.value = '';
-          await refreshAccessState();
-          statusEl.textContent = 'Logged out.';
-        } catch (err) {
-          statusEl.textContent = err.message || 'Logout failed.';
-        }
-      });
-
-      stripeCheckoutBtn.addEventListener('click', async () => {
-        try {
-          const res = await fetch('/api/billing/stripe/checkout', { method: 'POST' });
-          const payload = await res.json();
-          if (!res.ok) throw new Error(payload.detail || 'Stripe checkout failed.');
-          if (!payload.checkout_url) throw new Error('Missing Stripe checkout URL.');
-          window.location.href = payload.checkout_url;
-        } catch (err) {
-          statusEl.textContent = err.message || 'Stripe checkout failed.';
-        }
-      });
-
-      billingManageBtn.addEventListener('click', async () => {
-        try {
-          const res = await fetch('/api/billing/stripe/portal', { method: 'POST' });
-          const payload = await res.json();
-          if (!res.ok) throw new Error(payload.detail || 'Could not open billing portal.');
-          if (!payload.portal_url) throw new Error('Missing billing portal URL.');
-          window.location.href = payload.portal_url;
-        } catch (err) {
-          statusEl.textContent = err.message || 'Could not open billing portal.';
-        }
-      });
-
-      patreonConnectBtn.addEventListener('click', async () => {
-        try {
-          const res = await fetch('/api/billing/patreon/connect');
-          const payload = await res.json();
-          if (!res.ok) throw new Error(payload.detail || 'Patreon connect failed.');
-          if (!payload.auth_url) throw new Error('Missing Patreon auth URL.');
-          window.location.href = payload.auth_url;
-        } catch (err) {
-          statusEl.textContent = err.message || 'Patreon connect failed.';
-        }
+        localStorage.setItem('text_to_midi_premium_key', key);
+        await refreshAccessState();
+        statusEl.textContent = premiumUnlocked ? 'Premium key unlocked.' : 'Invalid premium key.';
       });
 
       form.addEventListener('submit', async (e) => {
@@ -1298,26 +1420,43 @@
         recordHistoryState(false);
         button.disabled = true;
         statusEl.textContent = 'Sending MIDI...';
-        isSending = true;
         notesMetaEl.textContent = 'Listening...';
+        const runId = playbackRunId + 1;
+        stopLocalPlayback();
+        playbackRunId = runId;
 
         try {
-          const data = new FormData(form);
-          const res = await fetch('/api/send-live', { method: 'POST', body: data });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ detail: 'Request failed.' }));
-            throw new Error(err.detail || 'Request failed.');
+          await ensureWebMidi();
+          const loopOn = !!loopEnabledInput.checked;
+          let loopsCompleted = 0;
+          const loopGapMs = Math.max(0, Number(loopGapInput.value || 0));
+
+          do {
+            const events = await fetchComposedEvents();
+            const totalMs = playEventsWebMidi(events, runId);
+            loopsCompleted += 1;
+            if (!loopOn) {
+              break;
+            }
+            await new Promise((resolve) => {
+              scheduleTimer(totalMs + loopGapMs, resolve, runId);
+            });
+          } while (runId === playbackRunId && loopEnabledInput.checked);
+
+          if (runId !== playbackRunId) {
+            statusEl.textContent = 'MIDI stopped.';
+          } else {
+            const targetName = portSelect.value || 'Browser synth';
+            statusEl.textContent = loopEnabledInput.checked
+              ? `MIDI looping on ${targetName} (loops: ${loopsCompleted}).`
+              : `MIDI sent on ${targetName}.`;
           }
-          const dataJson = await res.json();
-          const loopInfo = dataJson.looped ? ` (loops: ${dataJson.loops_completed})` : '';
-          statusEl.textContent = `${dataJson.status} on ${dataJson.port}${loopInfo}`;
         } catch (err) {
           statusEl.textContent = err.message;
-          if ((err.message || '').toLowerCase().includes('paid access required') || (err.message || '').toLowerCase().includes('login required')) {
+          if ((err.message || '').toLowerCase().includes('premium key required')) {
             await refreshAccessState();
           }
         } finally {
-          isSending = false;
           button.disabled = false;
           setPaidUiState();
         }
@@ -1328,7 +1467,7 @@
         statusEl.textContent = 'Saving MIDI file...';
         try {
           const data = new FormData(form);
-          const res = await fetch('/api/save-midi', { method: 'POST', body: data });
+          const res = await fetch('/api/save-midi', { method: 'POST', body: data, headers: getPremiumHeaders() });
           if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: 'Save failed.' }));
             throw new Error(err.detail || 'Save failed.');
@@ -1350,7 +1489,7 @@
           statusEl.textContent = `Saved ${filename}`;
         } catch (err) {
           statusEl.textContent = err.message || 'Save failed.';
-          if ((err.message || '').toLowerCase().includes('paid access required') || (err.message || '').toLowerCase().includes('login required')) {
+          if ((err.message || '').toLowerCase().includes('premium key required')) {
             await refreshAccessState();
           }
         } finally {
@@ -1378,8 +1517,6 @@
           degreeShiftInput.value = String(Math.floor(Math.random() * 9) - 4);
           updateShiftUnits();
           setBend(Math.floor(Math.random() * 56));
-          if (isSending) await pushLiveSettings();
-
           if (payload.port_name) {
             const hasPort = Array.from(portSelect.options).some((o) => o.value === payload.port_name);
             if (!hasPort) {
@@ -1401,7 +1538,6 @@
           if (!res.ok) throw new Error('Randomize text failed.');
           const payload = await res.json();
           textArea.value = payload.text || '';
-          if (isSending) await pushLiveSettings();
           statusEl.textContent = 'Randomized text.';
         } catch (err) {
           statusEl.textContent = err.message || 'Randomize text failed.';
@@ -1437,16 +1573,10 @@
         octaveShiftInput.value = '0';
         degreeShiftInput.value = '0';
         updateShiftUnits();
-        pushLiveSettings();
       });
       async function requestStop(silent = false) {
-        try {
-          const res = await fetch('/api/stop-live', { method: 'POST' });
-          const payload = await res.json().catch(() => ({ status: 'Stop requested.' }));
-          if (!silent) statusEl.textContent = payload.status || 'Stop requested.';
-        } catch (err) {
-          if (!silent) statusEl.textContent = err.message || 'Stop request failed.';
-        }
+        stopLocalPlayback();
+        if (!silent) statusEl.textContent = 'Stopped MIDI.';
       }
 
       stopMidiBtn.addEventListener('click', async () => {
@@ -1485,9 +1615,6 @@
         bendDial.style.setProperty('--value', clamped);
         bendDial.setAttribute('aria-valuenow', String(clamped));
         updateBendLabel();
-        if (isSending) {
-          pushLiveSettings();
-        }
       }
 
       function formatSignedUnit(value, unit) {
@@ -1519,110 +1646,19 @@
       }
 
       async function pollLiveNotes() {
-        if (!liveNotesBootstrapped) return;
-        try {
-          const res = await fetch(`/api/live-notes?after=${noteAfterId}`);
-          if (!res.ok) return;
-          const payload = await res.json();
-          const events = payload.events || [];
-          if (events.length) {
-            const groups = [];
-            let current = [];
-            let currentToken = '';
-            let currentChordSize = 0;
-            let currentStartTs = null;
-            let prevSynthTs = null;
-            let synthClusterOffset = 0;
-            for (const ev of events) {
-              const ts = Number(ev.ts || 0);
-              const name = formatNoteNameForKey(ev.note, keySelect.value) || String(ev.name || '');
-              const token = String(ev.source_token || '');
-              const units = Array.isArray(ev.source_units) ? ev.source_units.join('-') : '';
-              const noteIndex = Number.isFinite(Number(ev.note_index)) ? Number(ev.note_index) : -1;
-              const chordSize = Number.isFinite(Number(ev.chord_size)) ? Number(ev.chord_size) : 0;
-              const note = Number(ev.note);
-              const velocity = Number(ev.velocity || 100);
-              if (!name) continue;
-              if (synthVolume > 0 && Number.isFinite(note)) {
-                if (prevSynthTs === null) {
-                  synthClusterOffset = 0;
-                } else {
-                  const d = Math.max(0, ts - prevSynthTs);
-                  // Keep close-note microtiming (rolls/arp), reset on larger phrase gaps.
-                  if (d <= 0.09) {
-                    synthClusterOffset += d;
-                  } else {
-                    synthClusterOffset = 0;
-                  }
-                }
-                playBrowserNote(note, velocity, synthClusterOffset);
-                prevSynthTs = ts;
-              }
-              const item = { name, token, units };
-              // Word/chord-centric grouping:
-              // - Start a new row on note_index==0 (new chord),
-              // - Keep rolled/arpeggiated notes of that chord together,
-              // - Fall back to timing only when metadata is missing.
-              const startsNewChord = noteIndex === 0;
-              const sameToken = token && token === currentToken;
-              const sameChordSize = chordSize > 0 && chordSize === currentChordSize;
-              const withinFallbackWindow = currentStartTs !== null && Math.abs(ts - currentStartTs) <= 0.42;
-
-              if (!current.length) {
-                current = [item];
-                currentToken = token;
-                currentChordSize = chordSize;
-                currentStartTs = ts;
-                continue;
-              }
-
-              if (startsNewChord || (!sameToken && !withinFallbackWindow) || (!sameChordSize && chordSize > 0)) {
-                groups.push(current);
-                current = [item];
-                currentToken = token;
-                currentChordSize = chordSize;
-                currentStartTs = ts;
-              } else {
-                current.push(item);
-              }
-            }
-            if (current.length) groups.push(current);
-            for (const g of groups) appendNoteGroup(g);
-          }
-          noteAfterId = Number(payload.latest_id || noteAfterId);
-          notesMetaEl.textContent = payload.active
-            ? 'Streaming live notes...'
-            : (events.length ? 'Last send captured.' : 'Waiting for MIDI...');
-        } catch (_) {
-          // keep polling
-        }
+        // Live monitor is now fed directly from browser-side playback events.
       }
 
       async function primeLiveNotesCursor() {
         noteFeedEl.innerHTML = '';
         notesMetaEl.textContent = 'Waiting for MIDI...';
-        try {
-          const res = await fetch('/api/live-notes?after=0');
-          if (res.ok) {
-            const payload = await res.json();
-            noteAfterId = Number(payload.latest_id || 0);
-          }
-        } catch (_) {
-          // keep default cursor at 0 on network failure
-        } finally {
-          liveNotesBootstrapped = true;
-        }
+        noteAfterId = 0;
+        liveNotesBootstrapped = true;
       }
 
       async function clearNoteConsole() {
         noteFeedEl.innerHTML = '';
-        try {
-          const res = await fetch('/api/live-notes?after=0');
-          const payload = await res.json();
-          noteAfterId = Number(payload.latest_id || noteAfterId);
-        } catch (_) {
-          // keep current cursor if request fails
-        }
+        noteAfterId = 0;
         notesMetaEl.textContent = 'Cleared. Waiting for new MIDI...';
       }
 
@@ -1630,27 +1666,6 @@
         const min = inputEl.min !== '' ? Number(inputEl.min) : Number.NEGATIVE_INFINITY;
         const max = inputEl.max !== '' ? Number(inputEl.max) : Number.POSITIVE_INFINITY;
         return Math.max(min, Math.min(max, nextValue));
-      }
-
-      async function pushLiveSettings() {
-        if (!isSending) return;
-        const data = new FormData();
-        data.set('text', textArea.value || '');
-        data.set('tempo_bpm', tempoInput.value || '60');
-        data.set('key', keySelect.value || 'C');
-        data.set('mode', modeSelect.value || 'major');
-        data.set('voicing_mode', voicingSelect.value || 'closed');
-        data.set('port_name', portSelect.value || '');
-        data.set('bend_amount', bendInput.value || '0');
-        data.set('octave_shift', octaveShiftInput.value || '0');
-        data.set('degree_shift', degreeShiftInput.value || '0');
-        data.set('loop_enabled', loopEnabledInput.checked ? 'true' : 'false');
-        data.set('loop_gap_ms', loopGapInput.value || '0');
-        try {
-          await fetch('/api/update-live-settings', { method: 'POST', body: data });
-        } catch (_) {
-          // Non-fatal; next control change can retry.
-        }
       }
 
       let dialDragging = false;
@@ -1677,33 +1692,17 @@
         if (e.key === 'ArrowUp' || e.key === 'ArrowRight') { e.preventDefault(); setBend(cur + 2); }
         if (e.key === 'ArrowDown' || e.key === 'ArrowLeft') { e.preventDefault(); setBend(cur - 2); }
       });
-      tempoInput.addEventListener('change', pushLiveSettings);
-      tempoInput.addEventListener('input', pushLiveSettings);
-      keySelect.addEventListener('change', pushLiveSettings);
-      modeSelect.addEventListener('change', pushLiveSettings);
-      voicingSelect.addEventListener('change', pushLiveSettings);
-      octaveShiftInput.addEventListener('change', pushLiveSettings);
-      degreeShiftInput.addEventListener('change', pushLiveSettings);
-      octaveShiftInput.addEventListener('input', () => { updateShiftUnits(); pushLiveSettings(); });
-      degreeShiftInput.addEventListener('input', () => { updateShiftUnits(); pushLiveSettings(); });
-      portSelect.addEventListener('change', pushLiveSettings);
+      octaveShiftInput.addEventListener('input', () => { updateShiftUnits(); });
+      degreeShiftInput.addEventListener('input', () => { updateShiftUnits(); });
       loopEnabledInput.addEventListener('change', async () => {
-        await pushLiveSettings();
-        if (!loopEnabledInput.checked && isSending) {
+        if (!loopEnabledInput.checked) {
           await requestStop(true);
           statusEl.textContent = 'Loop disabled. Stopping current MIDI send...';
         }
       });
-      loopGapInput.addEventListener('change', pushLiveSettings);
-      loopGapInput.addEventListener('input', pushLiveSettings);
       [textArea, tempoInput, keySelect, modeSelect, voicingSelect, octaveShiftInput, degreeShiftInput, bendInput, synthVolumeInput, portSelect, loopEnabledInput, loopGapInput].forEach((el) => {
         el.addEventListener('input', queueHistoryRecord);
         el.addEventListener('change', queueHistoryRecord);
-      });
-      textArea.addEventListener('input', () => {
-        // Keep live loop editable without flooding; lightweight debounce.
-        clearTimeout(window.__textMidiUpdateTimer);
-        window.__textMidiUpdateTimer = setTimeout(() => { pushLiveSettings(); }, 220);
       });
       stepButtons.forEach((btn) => {
         btn.addEventListener('click', () => {
@@ -1778,6 +1777,7 @@
 
       setBend(0);
       setSynthVolume(70);
+      premiumKeyInput.value = localStorage.getItem('text_to_midi_premium_key') || '';
       updateTextLockUi();
       updateAmbienceUi();
       setAmbienceButtonVisual(false);
@@ -1794,14 +1794,6 @@
         window.addEventListener(evtName, () => { ensureAudioContext(); }, { once: true, passive: true });
       });
 
-      function requestStopKeepalive() {
-        try {
-          fetch('/api/stop-live', { method: 'POST', keepalive: true });
-        } catch (_) {
-          // best-effort only
-        }
-      }
-
       window.addEventListener('beforeunload', () => {
         stopAllBrowserVoices();
         ambienceOn = false;
@@ -1813,20 +1805,15 @@
         ambienceAudio.pause();
         if (ambienceBgVideo) ambienceBgVideo.pause();
         document.body.classList.remove('ambience-active');
-        requestStopKeepalive();
-        try {
-          navigator.sendBeacon('/api/stop-live');
-        } catch (_) {
-          // best-effort only
-        }
+        stopLocalPlayback();
       });
       window.addEventListener('pagehide', () => {
         stopAllBrowserVoices();
-        requestStopKeepalive();
+        stopLocalPlayback();
       });
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
-          requestStopKeepalive();
+          stopLocalPlayback();
         }
       });
     </script>

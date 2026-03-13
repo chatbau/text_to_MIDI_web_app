@@ -48,31 +48,10 @@ def load_mapper():
 
 mapper = load_mapper()
 app = FastAPI(title="Text to MIDI")
-SEND_LOCK = threading.Lock()
-STATE_LOCK = threading.Lock()
-NOTE_LOCK = threading.Lock()
-STOP_EVENT = threading.Event()
-SEND_ACTIVE = False
-NOTE_SEQ = 0
-NOTE_FEED: list[dict] = []
 QUOTE_LOCK = threading.Lock()
 QUOTE_POOL: list[dict] = []
 RECENT_QUOTES = deque(maxlen=60)
 RNG_LOCK = threading.Lock()
-LIVE_STATE = {
-    "text": "",
-    "tempo_bpm": 60,
-    "key": "C",
-    "mode": "major",
-    "port_name": "",
-    "bend_amount": 0,
-    "loop_enabled": False,
-    "loop_gap_ms": 0,
-    "octave_shift": 0,
-    "degree_shift": 0,
-    "voicing_mode": "closed",
-}
-MIN_LOOP_GAP_MS = 90
 
 KEY_OPTIONS = ["C", "C#", "Db", "D", "D#", "Eb", "E", "F", "F#", "Gb", "G", "G#", "Ab", "A", "A#", "Bb", "B"]
 MODE_OPTIONS = [
@@ -245,6 +224,7 @@ AUTH_COOKIE_NAME = "text_to_midi_session"
 SESSION_TTL_DAYS = 30
 AUTH_SECRET = os.getenv("APP_AUTH_SECRET", "change-me-in-production")
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+PREMIUM_ACCESS_KEY = os.getenv("PREMIUM_ACCESS_KEY", "").strip()
 
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "").strip()
 STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "").strip()
@@ -400,6 +380,24 @@ def require_paid_user(request: Request) -> sqlite3.Row:
     return user
 
 
+def has_valid_premium_key(request: Request, provided_key: str | None = None) -> bool:
+    if not PREMIUM_ACCESS_KEY:
+        return True
+    key = (provided_key or "").strip()
+    if not key:
+        key = (request.headers.get("X-Premium-Key", "") or "").strip()
+    if not key:
+        key = (request.query_params.get("premium_key", "") or "").strip()
+    if not key:
+        return False
+    return hmac.compare_digest(key, PREMIUM_ACCESS_KEY)
+
+
+def require_premium_access(request: Request, provided_key: str | None = None) -> None:
+    if not has_valid_premium_key(request, provided_key):
+        raise HTTPException(status_code=401, detail="Premium key required.")
+
+
 def get_current_user(request: Request) -> sqlite3.Row | None:
     token = request.cookies.get(AUTH_COOKIE_NAME, "")
     parsed = parse_session_token(token) if token else None
@@ -418,69 +416,6 @@ def public_user_payload(user: sqlite3.Row | None) -> dict:
         "paid_access": user_has_paid_access(user),
         "entitlement_source": user["entitlement_source"] or "none",
     }
-
-
-def available_output_ports():
-    try:
-        return mapper.mido.get_output_names()
-    except Exception:
-        return []
-
-
-def emit_browser_only_events(events, stop_requested=None, note_callback=None):
-    """
-    Fallback for cloud environments where no MIDI output ports exist.
-    Emits note callbacks with timing so browser synth/live monitor still works.
-    """
-    for event in events:
-        if stop_requested and stop_requested():
-            return False
-        chord = event.get("chord", []) or []
-        advance = float(event.get("advance_sec", event.get("duration_sec", 0.0)) or 0.0)
-        velocity = int(event.get("velocity", 96))
-        source_token = str(event.get("source_token", ""))
-        source_units = event.get("source_units", []) or []
-        source_syllables = int(event.get("source_syllables", 0))
-        arp_steps = event.get("arpeggio_steps_sec", []) or []
-
-        if not chord:
-            if advance > 0:
-                if not wait_with_stop(STOP_EVENT, advance):
-                    return False
-            continue
-
-        elapsed = 0.0
-        chord_size = len(chord)
-        for i, note in enumerate(chord):
-            if note_callback:
-                try:
-                    note_callback(
-                        int(note),
-                        velocity,
-                        source_token,
-                        source_units,
-                        source_syllables,
-                        note_index=i,
-                        chord_size=chord_size,
-                    )
-                except TypeError:
-                    note_callback(int(note), velocity, source_token, source_units, source_syllables)
-
-            if i < chord_size - 1:
-                step = float(arp_steps[i] if i < len(arp_steps) else 0.0)
-                if step > 0:
-                    elapsed += step
-                    if not wait_with_stop(STOP_EVENT, step):
-                        return False
-
-        remaining = max(0.0, advance - elapsed)
-        if remaining > 0:
-            if not wait_with_stop(STOP_EVENT, remaining):
-                return False
-    return True
-
-
-init_auth_db()
 
 
 def random_text():
@@ -833,93 +768,6 @@ def build_events(text: str, key: str, mode: str, variation_seed: int | None = No
     if not note_events:
         raise HTTPException(status_code=400, detail="No MIDI notes generated for this input.")
     return events, note_events
-
-
-def wait_with_stop(stop_event: threading.Event, seconds: float):
-    end = time.monotonic() + max(0.0, seconds)
-    while time.monotonic() < end:
-        if stop_event.is_set():
-            return False
-        time.sleep(0.02)
-    return True
-
-
-def panic_midi_port(port_name: str):
-    try:
-        with mapper.mido.open_output(port_name) as outport:
-            for ch in range(16):
-                outport.send(mapper.Message("control_change", channel=ch, control=123, value=0))  # all notes off
-                outport.send(mapper.Message("control_change", channel=ch, control=120, value=0))  # all sound off
-                outport.send(mapper.Message("pitchwheel", channel=ch, pitch=0))
-            # Extra safety for synths ignoring CC 123/120.
-            for ch in range(16):
-                for note in range(128):
-                    outport.send(mapper.Message("note_off", channel=ch, note=note, velocity=0))
-    except Exception:
-        # Panic should never raise for API callers.
-        pass
-
-
-def panic_midi_outputs():
-    ports = []
-    try:
-        ports = mapper.mido.get_output_names()
-    except Exception:
-        ports = []
-
-    with STATE_LOCK:
-        selected = (LIVE_STATE.get("port_name") or "").strip()
-    if selected and selected not in ports:
-        ports.insert(0, selected)
-
-    for port in ports:
-        panic_midi_port(port)
-
-
-def clear_note_feed():
-    global NOTE_SEQ
-    with NOTE_LOCK:
-        NOTE_SEQ = 0
-        NOTE_FEED.clear()
-
-
-def push_note_event(
-    note: int,
-    velocity: int,
-    source_token: str = "",
-    source_units=None,
-    source_syllables: int = 0,
-    note_index: int | None = None,
-    chord_size: int | None = None,
-):
-    global NOTE_SEQ
-    name = mapper.midi_note_to_name(int(note))
-    token = str(source_token or "")
-    units = list(source_units or [])
-    syllables = int(source_syllables or 0)
-    idx = int(note_index or 0)
-    single_unit = ""
-    if units:
-        single_unit = str(units[idx % len(units)])
-    with NOTE_LOCK:
-        NOTE_SEQ += 1
-        NOTE_FEED.append(
-            {
-                "id": NOTE_SEQ,
-                "note": int(note),
-                "name": name,
-                "velocity": int(velocity),
-                "source_token": token,
-                "source_units": units,
-                "source_unit": single_unit,
-                "source_syllables": syllables,
-                "note_index": idx,
-                "chord_size": int(chord_size or 0),
-                "ts": round(time.time(), 3),
-            }
-        )
-        if len(NOTE_FEED) > 600:
-            del NOTE_FEED[:200]
 
 
 def patreon_api_request(url: str, access_token: str, method: str = "GET", data: dict | None = None) -> dict:
@@ -1329,26 +1177,10 @@ def patreon_sync(request: Request):
     return {"ok": ok, "user": public_user_payload(fresh)}
 
 
-@app.get("/api/ports")
-def get_ports():
-    return {"ports": available_output_ports()}
-
-
-@app.get("/api/live-notes")
-def get_live_notes(after: int = Query(default=0, ge=0)):
-    with NOTE_LOCK:
-        events = [e for e in NOTE_FEED if int(e["id"]) > int(after)]
-        latest = NOTE_SEQ
-    with SEND_LOCK:
-        active = SEND_ACTIVE
-    return {"events": events, "latest_id": latest, "active": active}
-
-
 @app.get("/api/randomize")
 def randomize_payload():
     txt, source_title, source = random_cartoon_quote()
 
-    ports = available_output_ports()
     return {
         "tempo_bpm": int(round(random.triangular(20, 200, 55))),
         "key": random.choice(KEY_OPTIONS),
@@ -1357,7 +1189,6 @@ def randomize_payload():
         "text_source": source,
         "text_style": "sentences",
         "source_title": source_title,
-        "port_name": random.choice(ports) if ports else "",
     }
 
 
@@ -1372,301 +1203,17 @@ def randomize_text_only():
     }
 
 
+@app.get("/api/access/check")
+def access_check(request: Request):
+    return {
+        "premium_required": bool(PREMIUM_ACCESS_KEY),
+        "unlocked": has_valid_premium_key(request),
+    }
+
+
 def normalize_voicing_mode(value: str | None) -> str:
     mode = str(value or "closed").strip().lower()
     return "open" if mode == "open" else "closed"
-
-
-@app.post("/api/send-live")
-def send_live(
-    request: Request,
-    text: str = Form(...),
-    tempo_bpm: int = Form(60),
-    key: str = Form("C"),
-    mode: str = Form("major"),
-    port_name: str = Form(""),
-    bend_amount: int = Form(0),
-    loop_enabled: bool = Form(False),
-    loop_gap_ms: int = Form(0),
-    octave_shift: int = Form(0),
-    degree_shift: int = Form(0),
-    voicing_mode: str = Form("closed"),
-):
-    require_paid_user(request)
-    global SEND_ACTIVE
-    text = text.strip()
-    if not text:
-        raise HTTPException(status_code=400, detail="Text is required.")
-
-    tempo_bpm = max(20, min(200, int(tempo_bpm)))
-    bend_amount = max(0, min(100, int(bend_amount)))
-    loop_gap_ms = max(0, min(5000, int(loop_gap_ms)))
-    if loop_enabled:
-        loop_gap_ms = max(MIN_LOOP_GAP_MS, loop_gap_ms)
-    octave_shift = max(-3, min(3, int(octave_shift)))
-    degree_shift = max(-14, min(14, int(degree_shift)))
-    voicing_mode = normalize_voicing_mode(voicing_mode)
-    with SEND_LOCK:
-        if SEND_ACTIVE:
-            raise HTTPException(status_code=409, detail="A MIDI send is already in progress.")
-        SEND_ACTIVE = True
-        STOP_EVENT.clear()
-        with STATE_LOCK:
-            LIVE_STATE["text"] = text
-            LIVE_STATE["tempo_bpm"] = tempo_bpm
-            LIVE_STATE["key"] = key
-            LIVE_STATE["mode"] = mode
-            LIVE_STATE["port_name"] = port_name.strip()
-            LIVE_STATE["bend_amount"] = bend_amount
-            LIVE_STATE["loop_enabled"] = bool(loop_enabled)
-            LIVE_STATE["loop_gap_ms"] = loop_gap_ms
-            LIVE_STATE["octave_shift"] = octave_shift
-            LIVE_STATE["degree_shift"] = degree_shift
-            LIVE_STATE["voicing_mode"] = voicing_mode
-
-    run_seed = random.getrandbits(64)
-
-    try:
-        completed = True
-        loop_count = 0
-        last_note_names = []
-        last_port = ""
-        with STATE_LOCK:
-            state = dict(LIVE_STATE)
-
-        if not bool(state["loop_enabled"]):
-            current_text = state["text"].strip()
-            if not current_text:
-                raise HTTPException(status_code=400, detail="Text is required.")
-
-            base_seed = stable_variation_seed(run_seed, current_text)
-            base_events, note_events = build_events(
-                current_text,
-                key=state["key"],
-                mode=state["mode"],
-                variation_seed=base_seed,
-            )
-            ports = available_output_ports()
-            chosen_port = ""
-            browser_only = not ports
-            if not browser_only:
-                chosen_port = state["port_name"] if state["port_name"] else ports[0]
-                if chosen_port not in ports:
-                    chosen_port = ports[0]
-
-            def state_provider():
-                with STATE_LOCK:
-                    live = dict(LIVE_STATE)
-                key_pc_live = mapper.parse_key_root(live.get("key", "C"))
-                mode_name_live = mapper.parse_mode(live.get("mode", "major")) or live.get("mode", "major")
-                mode_intervals_live = mapper.MODE_INTERVALS.get(mode_name_live, mapper.MODE_INTERVALS["major"])
-                return {
-                    "tempo_bpm": int(live.get("tempo_bpm", 60)),
-                    "key_root_pc": key_pc_live if key_pc_live is not None else mapper.NOTE_NAME_TO_PC["C"],
-                    "mode_intervals": mode_intervals_live,
-                    "octave_shift": int(live.get("octave_shift", 0)),
-                    "degree_shift": int(live.get("degree_shift", 0)),
-                    "bend_amount": int(live.get("bend_amount", 0)),
-                    "voicing_mode": normalize_voicing_mode(live.get("voicing_mode", "closed")),
-                }
-
-            loop_count = 1
-            if browser_only:
-                latest_state = state_provider()
-                preview_events = mapper.transform_events_pitch(
-                    base_events,
-                    key_root_pc=latest_state["key_root_pc"],
-                    mode_intervals=latest_state["mode_intervals"],
-                    octave_shift=latest_state["octave_shift"],
-                    degree_shift=latest_state["degree_shift"],
-                )
-                preview_events = mapper.apply_voicing_to_events(
-                    preview_events,
-                    voicing_mode=latest_state["voicing_mode"],
-                )
-                preview_events = mapper.add_pitch_bend_to_events(
-                    preview_events, bend_amount=int(latest_state["bend_amount"])
-                )
-                timed_preview_events = mapper.apply_tempo_to_events(
-                    preview_events, int(latest_state["tempo_bpm"])
-                )
-                completed = emit_browser_only_events(
-                    timed_preview_events, stop_requested=STOP_EVENT.is_set, note_callback=push_note_event
-                )
-            else:
-                completed = mapper.send_live_reactive(
-                    chosen_port,
-                    base_events,
-                    state_provider=state_provider,
-                    stop_requested=STOP_EVENT.is_set,
-                    note_callback=push_note_event,
-                )
-            # Build a small preview of last-sent notes with latest settings.
-            latest_state = state_provider()
-            preview_events = mapper.transform_events_pitch(
-                base_events,
-                key_root_pc=latest_state["key_root_pc"],
-                mode_intervals=latest_state["mode_intervals"],
-                octave_shift=latest_state["octave_shift"],
-                degree_shift=latest_state["degree_shift"],
-            )
-            preview_events = mapper.apply_voicing_to_events(
-                preview_events,
-                voicing_mode=latest_state["voicing_mode"],
-            )
-            preview_notes = [e for e in preview_events if e.get("chord")]
-            last_note_names = [[mapper.midi_note_to_name(n) for n in e["chord"]] for e in preview_notes]
-            last_port = chosen_port if chosen_port else "Browser Synth Only"
-
-            with STATE_LOCK:
-                state = dict(LIVE_STATE)
-        else:
-            while True:
-                with STATE_LOCK:
-                    state = dict(LIVE_STATE)
-
-                # Resolve latest settings each loop pass so UI updates can take effect.
-                current_text = state["text"].strip()
-                if not current_text:
-                    raise HTTPException(status_code=400, detail="Text is required.")
-
-                loop_seed = stable_variation_seed(run_seed, current_text)
-                events, note_events = build_events(
-                    current_text,
-                    key=state["key"],
-                    mode=state["mode"],
-                    variation_seed=loop_seed,
-                )
-                key_pc = mapper.parse_key_root(state["key"])
-                mode_name = mapper.parse_mode(state["mode"]) or state["mode"]
-                mode_intervals = mapper.MODE_INTERVALS.get(mode_name, mapper.MODE_INTERVALS["major"])
-                events = mapper.transform_events_pitch(
-                    events,
-                    key_root_pc=key_pc if key_pc is not None else mapper.NOTE_NAME_TO_PC["C"],
-                    mode_intervals=mode_intervals,
-                    octave_shift=int(state.get("octave_shift", 0)),
-                    degree_shift=int(state.get("degree_shift", 0)),
-                )
-                events = mapper.apply_voicing_to_events(
-                    events,
-                    voicing_mode=normalize_voicing_mode(state.get("voicing_mode", "closed")),
-                )
-                ports = available_output_ports()
-                chosen_port = ""
-                browser_only = not ports
-                if not browser_only:
-                    chosen_port = state["port_name"] if state["port_name"] else ports[0]
-                    if chosen_port not in ports:
-                        chosen_port = ports[0]
-
-                bent_events = mapper.add_pitch_bend_to_events(events, bend_amount=int(state["bend_amount"]))
-                timed_events = mapper.apply_tempo_to_events(bent_events, int(state["tempo_bpm"]))
-
-                loop_count += 1
-                if browser_only:
-                    completed = emit_browser_only_events(
-                        timed_events, stop_requested=STOP_EVENT.is_set, note_callback=push_note_event
-                    )
-                else:
-                    completed = mapper.send_live(
-                        chosen_port,
-                        timed_events,
-                        stop_requested=STOP_EVENT.is_set,
-                        note_callback=push_note_event,
-                    )
-                last_note_names = [[mapper.midi_note_to_name(n) for n in e["chord"]] for e in events if e.get("chord")]
-                last_port = chosen_port if chosen_port else "Browser Synth Only"
-                if not completed:
-                    break
-                if not bool(state["loop_enabled"]):
-                    break
-                if not wait_with_stop(STOP_EVENT, int(state["loop_gap_ms"]) / 1000.0):
-                    completed = False
-                    break
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to send MIDI live: {exc}")
-    finally:
-        with SEND_LOCK:
-            SEND_ACTIVE = False
-            STOP_EVENT.clear()
-
-    return JSONResponse(
-        {
-            "status": "MIDI sent" if completed else "MIDI stopped",
-            "port": last_port,
-            "notes": last_note_names,
-            "looped": bool(state["loop_enabled"]),
-            "loops_completed": loop_count,
-        }
-    )
-
-
-@app.post("/api/stop-live")
-def stop_live():
-    with SEND_LOCK:
-        active = SEND_ACTIVE
-    STOP_EVENT.set()
-    panic_midi_outputs()
-    if active:
-        return {"status": "Stopping current MIDI send and clearing MIDI output..."}
-    return {"status": "No active MIDI send. Sent panic reset to MIDI outputs."}
-
-
-@app.post("/api/update-live-settings")
-def update_live_settings(
-    request: Request,
-    text: str | None = Form(default=None),
-    tempo_bpm: int | None = Form(default=None),
-    key: str | None = Form(default=None),
-    mode: str | None = Form(default=None),
-    port_name: str | None = Form(default=None),
-    bend_amount: int | None = Form(default=None),
-    loop_enabled: bool | None = Form(default=None),
-    loop_gap_ms: int | None = Form(default=None),
-    octave_shift: int | None = Form(default=None),
-    degree_shift: int | None = Form(default=None),
-    voicing_mode: str | None = Form(default=None),
-):
-    require_paid_user(request)
-    stop_now = False
-    with STATE_LOCK:
-        prev_loop = bool(LIVE_STATE.get("loop_enabled", False))
-        if text is not None:
-            LIVE_STATE["text"] = text
-        if tempo_bpm is not None:
-            LIVE_STATE["tempo_bpm"] = max(20, min(200, int(tempo_bpm)))
-        if key is not None:
-            LIVE_STATE["key"] = key
-        if mode is not None:
-            LIVE_STATE["mode"] = mode
-        if port_name is not None:
-            LIVE_STATE["port_name"] = port_name.strip()
-        if bend_amount is not None:
-            LIVE_STATE["bend_amount"] = max(0, min(100, int(bend_amount)))
-        if loop_enabled is not None:
-            LIVE_STATE["loop_enabled"] = bool(loop_enabled)
-            if prev_loop and not bool(loop_enabled):
-                stop_now = True
-        if loop_gap_ms is not None:
-            next_gap = max(0, min(5000, int(loop_gap_ms)))
-            loop_on = bool(loop_enabled) if loop_enabled is not None else bool(LIVE_STATE["loop_enabled"])
-            if loop_on:
-                next_gap = max(MIN_LOOP_GAP_MS, next_gap)
-            LIVE_STATE["loop_gap_ms"] = next_gap
-        if octave_shift is not None:
-            LIVE_STATE["octave_shift"] = max(-3, min(3, int(octave_shift)))
-        if degree_shift is not None:
-            LIVE_STATE["degree_shift"] = max(-14, min(14, int(degree_shift)))
-        if voicing_mode is not None:
-            LIVE_STATE["voicing_mode"] = normalize_voicing_mode(voicing_mode)
-        state = dict(LIVE_STATE)
-
-    if stop_now:
-        STOP_EVENT.set()
-
-    with SEND_LOCK:
-        active = SEND_ACTIVE
-    return {"status": "updated", "active": active, "state": state}
 
 
 @app.post("/api/save-midi")
@@ -1680,8 +1227,9 @@ def save_midi_file(
     octave_shift: int = Form(0),
     degree_shift: int = Form(0),
     voicing_mode: str = Form("closed"),
+    premium_key: str = Form(""),
 ):
-    require_paid_user(request)
+    require_premium_access(request, premium_key)
     text = text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="Text is required.")
@@ -1707,6 +1255,64 @@ def save_midi_file(
     tmp_path = Path(tempfile.gettempdir()) / out_name
     mapper.save_midi(str(tmp_path), events, source_text=text, tempo_bpm=tempo_bpm)
     return FileResponse(path=str(tmp_path), media_type="audio/midi", filename=out_name)
+
+
+@app.post("/api/compose-events")
+def compose_events(
+    request: Request,
+    text: str = Form(...),
+    tempo_bpm: int = Form(60),
+    key: str = Form("C"),
+    mode: str = Form("major"),
+    bend_amount: int = Form(0),
+    octave_shift: int = Form(0),
+    degree_shift: int = Form(0),
+    voicing_mode: str = Form("closed"),
+    premium_key: str = Form(""),
+):
+    require_premium_access(request, premium_key)
+    text = text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required.")
+
+    tempo_bpm = max(20, min(200, int(tempo_bpm)))
+    octave_shift = max(-3, min(3, int(octave_shift)))
+    degree_shift = max(-14, min(14, int(degree_shift)))
+    bend_amount = max(0, min(100, int(bend_amount)))
+    voicing_mode = normalize_voicing_mode(voicing_mode)
+
+    events, _ = build_events(text, key=key, mode=mode)
+    key_pc = mapper.parse_key_root(key)
+    mode_name = mapper.parse_mode(mode) or mode
+    mode_intervals = mapper.MODE_INTERVALS.get(mode_name, mapper.MODE_INTERVALS["major"])
+    events = mapper.transform_events_pitch(
+        events,
+        key_root_pc=key_pc if key_pc is not None else mapper.NOTE_NAME_TO_PC["C"],
+        mode_intervals=mode_intervals,
+        octave_shift=octave_shift,
+        degree_shift=degree_shift,
+    )
+    events = mapper.apply_voicing_to_events(events, voicing_mode=voicing_mode)
+    events = mapper.add_pitch_bend_to_events(events, bend_amount=bend_amount)
+    events = mapper.apply_tempo_to_events(events, tempo_bpm)
+
+    out_events: list[dict] = []
+    for event in events:
+        out_events.append(
+            {
+                "chord": [int(n) for n in (event.get("chord") or [])],
+                "duration_sec": float(event.get("duration_sec", 0.0)),
+                "advance_sec": float(event.get("advance_sec", 0.0)),
+                "velocity": int(event.get("velocity", 0)),
+                "arpeggio_steps_sec": [float(x) for x in (event.get("arpeggio_steps_sec") or [])],
+                "bend_curve": [[float(p[0]), int(p[1])] for p in (event.get("bend_curve") or [])],
+                "source_token": str(event.get("source_token", "") or ""),
+                "source_units": [str(u) for u in (event.get("source_units") or [])],
+                "source_syllables": int(event.get("source_syllables", 0) or 0),
+            }
+        )
+
+    return JSONResponse({"events": out_events, "tempo_bpm": tempo_bpm})
 
 
 app.mount("/", StaticFiles(directory=str(BASE_DIR / "static"), html=True), name="static")
