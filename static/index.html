@@ -123,19 +123,19 @@
         background-repeat: no-repeat;
         background-size: contain;
         image-rendering: pixelated;
-        background-image: url('/lock_icon_locked.png');
+        background-image: url('./lock_icon_locked.png');
       }
       .icon-lock-btn.unlocked .lock-glyph {
-        background-image: url('/lock_icon_unlocked.png');
+        background-image: url('./lock_icon_unlocked.png');
       }
       #lockText .lock-glyph {
         width: 46px;
         height: 46px;
-        background-image: url('/lock_icon_locked_text.png');
+        background-image: url('./lock_icon_locked_text.png');
         transform: none;
       }
       #lockText.unlocked .lock-glyph {
-        background-image: url('/lock_icon_unlocked_text.png');
+        background-image: url('./lock_icon_unlocked_text.png');
       }
       .text-tools #lockText {
         width: 44px;
@@ -487,12 +487,12 @@
   </head>
   <body>
     <video id="ambienceBgVideo" muted loop playsinline preload="auto">
-      <source src="/flowing_grass_3.mp4" type="video/mp4" />
+      <source src="./flowing_grass_3.mp4" type="video/mp4" />
     </video>
     <div class="wrap">
       <div class="card">
         <div class="topbar">
-          <img src="/image.jpg" alt="Reference" class="portrait" />
+          <img src="./image.jpg" alt="Reference" class="portrait" />
           <div class="title-wrap">
             <h1>text<span class="title-underscore">_</span>to<span class="title-underscore">_</span><span class="title-midi">MIDI</span></h1>
             <p>Type text, pick tempo/key/mode, choose a MIDI output port, then send live to your DAW.</p>
@@ -593,7 +593,7 @@
                 <div class="bend-label">Ambience</div>
                 <button id="ambienceToggle" class="btn-secondary ambience-video-btn" type="button" aria-label="Ambience toggle" title="Ambience">
                   <video id="ambienceToggleVideo" muted loop playsinline preload="auto">
-                    <source src="/flowing_grass_cropped_1.mp4" type="video/mp4" />
+                    <source src="./flowing_grass_cropped_1.mp4" type="video/mp4" />
                   </video>
                 </button>
               </div>
@@ -732,16 +732,16 @@
       const premiumKeyInput = document.getElementById('premiumKey');
       const premiumUnlockBtn = document.getElementById('premiumUnlock');
       const accessStatusEl = document.getElementById('accessStatus');
-      const uiClickAudio = new Audio('/ui_click.wav?v=20260304-082617');
+      const uiClickAudio = new Audio('./ui_click.wav?v=20260304-082617');
       uiClickAudio.preload = 'auto';
-      const ambienceAudio = new Audio('/ambience.wav');
+      const ambienceAudio = new Audio('./ambience.wav');
       ambienceAudio.loop = true;
       ambienceAudio.preload = 'auto';
       ambienceAudio.volume = 1.0;
       const ambienceBgVideo = document.getElementById('ambienceBgVideo');
       const ambienceToggleVideo = document.getElementById('ambienceToggleVideo');
-      const lockOnAudio = new Audio('/lock_sound.wav');
-      const lockOffAudio = new Audio('/unlock_sound.wav');
+      const lockOnAudio = new Audio('./lock_sound.wav');
+      const lockOffAudio = new Audio('./unlock_sound.wav');
       lockOnAudio.preload = 'auto';
       lockOffAudio.preload = 'auto';
       let noteAfterId = 0;
