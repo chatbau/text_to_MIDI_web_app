@@ -781,35 +781,40 @@
         return (premiumKeyInput?.value || localStorage.getItem('text_to_midi_premium_key') || '').trim();
       }
 
-      function getPremiumHeaders() {
-        const key = getPremiumKey();
-        return key ? { 'X-Premium-Key': key } : {};
-      }
+      const SHARED_PREMIUM_KEY = 'patreon-premium-2026';
+      const KEY_TO_PC = { C:0, 'C#':1, Db:1, D:2, 'D#':3, Eb:3, E:4, F:5, 'F#':6, Gb:6, G:7, 'G#':8, Ab:8, A:9, 'A#':10, Bb:10, B:11 };
+      const MODE_TO_STEPS = {
+        major:[0,2,4,5,7,9,11],
+        minor:[0,2,3,5,7,8,10],
+        chromatic:[0,1,2,3,4,5,6,7,8,9,10,11],
+        major7:[0,4,7,11],
+        minor7:[0,3,7,10],
+        major_pentatonic:[0,2,4,7,9],
+        minor_pentatonic:[0,3,5,7,10],
+        dorian:[0,2,3,5,7,9,10],
+        phrygian:[0,1,3,5,7,8,10],
+        lydian:[0,2,4,6,7,9,11],
+        mixolydian:[0,2,4,5,7,9,10],
+        locrian:[0,1,3,5,6,8,10]
+      };
+      const TEXT_POOL = [
+        'Sucking at something is the first step to being sorta good at something.',
+        'People get built different, and that is part of the beauty.',
+        'It gets easier, but you have to do it every day.',
+        'In a noisy world, rhythm can be a form of clarity.',
+        'Sometimes life is scary and dark, and we still move forward.',
+        'You can be soft and still be strong.',
+        'To live life, you need problems.',
+        'Every day is a chance to choose a better pattern.',
+        'I do not want perfect, I want real.',
+        'Even heroes get scared and keep going.'
+      ];
 
       function setPaidUiState() {
         const ok = !premiumRequired || premiumUnlocked;
         button.disabled = !ok;
         saveMidiBtn.disabled = !ok;
         stopMidiBtn.disabled = !ok;
-      }
-
-      async function apiFormPost(url, bodyObj = {}) {
-        const data = new FormData();
-        Object.entries(bodyObj).forEach(([k, v]) => data.append(k, String(v ?? '')));
-        const key = getPremiumKey();
-        if (key) data.set('premium_key', key);
-        const res = await fetch(url, { method: 'POST', body: data, headers: getPremiumHeaders() });
-        let payload = {};
-        try {
-          payload = await res.json();
-        } catch (_) {
-          payload = {};
-        }
-        if (!res.ok) {
-          const msg = payload.detail || payload.error || `Request failed (${res.status})`;
-          throw new Error(msg);
-        }
-        return payload;
       }
 
       async function ensureWebMidi() {
@@ -881,15 +886,143 @@
         scheduledTimers.push(id);
       }
 
-      async function fetchComposedEvents() {
-        const data = new FormData(form);
-        const res = await fetch('/api/compose-events', { method: 'POST', body: data, headers: getPremiumHeaders() });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: 'Request failed.' }));
-          throw new Error(err.detail || 'Failed to compose MIDI events.');
+      function stableHash(str) {
+        let h = 2166136261 >>> 0;
+        for (let i = 0; i < str.length; i++) {
+          h ^= str.charCodeAt(i);
+          h = Math.imul(h, 16777619);
         }
-        const payload = await res.json();
-        return payload.events || [];
+        return h >>> 0;
+      }
+
+      function seededRand(seed, idx = 0) {
+        const x = Math.sin((seed + 1 + idx) * 12.9898) * 43758.5453123;
+        return x - Math.floor(x);
+      }
+
+      function countSyllables(word) {
+        const w = (word || '').toLowerCase().replace(/[^a-z]/g, '');
+        if (!w) return 1;
+        const groups = w.match(/[aeiouy]+/g);
+        let n = groups ? groups.length : 1;
+        if (w.endsWith('e') && n > 1) n -= 1;
+        return Math.max(1, n);
+      }
+
+      function tokenize(text) {
+        return (text.match(/[A-Za-z][A-Za-z'-]*|[.,!?;:]/g) || []);
+      }
+
+      function nearestPitchInScale(raw, key, mode, degreeShift = 0, octaveShift = 0) {
+        const steps = MODE_TO_STEPS[mode] || MODE_TO_STEPS.major;
+        const keyPc = KEY_TO_PC[key] ?? 0;
+        const target = Math.round(raw) + (Number(octaveShift || 0) * 12);
+        const cands = [];
+        for (let oct = -2; oct <= 9; oct++) {
+          for (let i = 0; i < steps.length; i++) {
+            const step = steps[(i + (Number(degreeShift || 0))) % steps.length];
+            const pc = (keyPc + step + 120) % 12;
+            cands.push((oct + 1) * 12 + pc);
+          }
+        }
+        let best = cands[0];
+        let bestD = Math.abs(best - target);
+        for (const c of cands) {
+          const d = Math.abs(c - target);
+          if (d < bestD) {
+            bestD = d;
+            best = c;
+          }
+        }
+        return Math.max(24, Math.min(108, best));
+      }
+
+      function buildChord(rawRoot, chordSize, key, mode, voicing, degreeShift, octaveShift) {
+        const steps = MODE_TO_STEPS[mode] || MODE_TO_STEPS.major;
+        const chord = [];
+        for (let i = 0; i < chordSize; i++) {
+          const idx = i * 2;
+          const st = steps[idx % steps.length] + 12 * Math.floor(idx / steps.length);
+          const raw = rawRoot + st;
+          chord.push(nearestPitchInScale(raw, key, mode, degreeShift, octaveShift));
+        }
+        chord.sort((a, b) => a - b);
+        if (voicing === 'open') {
+          for (let i = 1; i < chord.length; i += 2) chord[i] += 12;
+          chord.sort((a, b) => a - b);
+        }
+        return chord.map((n) => Math.max(24, Math.min(108, n)));
+      }
+
+      function composeEventsLocal() {
+        const text = String(textArea.value || '').trim();
+        if (!text) throw new Error('Type some text first.');
+        const bpm = Math.max(20, Math.min(200, Number(tempoInput.value || 60)));
+        const key = keySelect.value || 'C';
+        const mode = modeSelect.value || 'major';
+        const voicing = voicingSelect.value || 'closed';
+        const degreeShift = Number(degreeShiftInput.value || 0);
+        const octaveShift = Number(octaveShiftInput.value || 0);
+        const bendAmount = Math.max(0, Math.min(100, Number(bendInput.value || 0)));
+        const beatSec = 60 / bpm;
+        const tokens = tokenize(text);
+        const seedBase = stableHash(`${text}|${key}|${mode}|${voicing}|${degreeShift}|${octaveShift}`);
+        const events = [];
+
+        let wordIdx = 0;
+        for (let i = 0; i < tokens.length; i++) {
+          const tok = tokens[i];
+          const punct = /^[.,!?;:]$/.test(tok);
+          if (punct) {
+            const pGap = tok === ',' || tok === ';' || tok === ':' ? 0.18 : 0.34;
+            events.push({ chord: [], velocity: 0, duration_sec: 0, advance_sec: pGap, arpeggio_steps_sec: [], bend_curve: [], source_token: tok, source_units: [tok], source_syllables: 0 });
+            continue;
+          }
+
+          const syll = countSyllables(tok);
+          const chordSize = Math.max(2, Math.min(6, syll));
+          const seed = stableHash(`${seedBase}|${tok.toLowerCase()}|${wordIdx}`);
+          const rootRaw = 42 + Math.floor(seededRand(seed, 1) * 30);
+          const chord = buildChord(rootRaw, chordSize, key, mode, voicing, degreeShift, octaveShift);
+          const longWord = tok.length >= 7;
+          const arpProb = longWord ? 0.78 : 0.48;
+          const doArp = seededRand(seed, 2) < arpProb;
+          const arpSteps = [];
+          if (doArp && chord.length > 1) {
+            let spread = (0.012 + seededRand(seed, 3) * 0.035) * (0.9 + chord.length * 0.18);
+            for (let a = 0; a < chord.length - 1; a++) {
+              const jitter = (seededRand(seed, 10 + a) - 0.5) * 0.015;
+              arpSteps.push(Math.max(0.002, spread / (chord.length - 1) + jitter));
+            }
+          } else {
+            for (let a = 0; a < chord.length - 1; a++) arpSteps.push(0);
+          }
+          const durationSec = Math.max(0.08, beatSec * (0.28 + Math.min(0.55, tok.length * 0.02)));
+          const spaceAfter = (i < tokens.length - 1 && !/^[.,!?;:]$/.test(tokens[i + 1])) ? 0.03 : 0;
+          const advanceSec = durationSec + spaceAfter;
+          const velocity = Math.max(36, Math.min(118, Math.round(58 + seededRand(seed, 4) * 40)));
+
+          const bendCurve = [];
+          if (bendAmount > 0) {
+            const cents = bendAmount * 8;
+            const bend = Math.max(-8192, Math.min(8191, Math.round((cents / 200) * 8192)));
+            bendCurve.push([0.0, bend], [0.35, Math.round(bend * 0.25)], [0.75, 0], [1.0, 0]);
+          }
+
+          events.push({
+            chord,
+            velocity,
+            duration_sec: durationSec,
+            advance_sec: advanceSec,
+            arpeggio_steps_sec: arpSteps,
+            bend_curve: bendCurve,
+            source_token: tok,
+            source_units: splitTokenReadable(tok, syll),
+            source_syllables: syll
+          });
+          wordIdx += 1;
+        }
+        return events;
       }
 
       function appendMonitorGroupFromEvent(event, noteNames) {
@@ -916,7 +1049,9 @@
 
           if (chord.length) {
             const noteNames = chord.map((n) => formatNoteNameForKey(n, keySelect.value));
-            appendMonitorGroupFromEvent(ev, noteNames);
+            scheduleTimer(eventStartMs - performance.now(), () => {
+              appendMonitorGroupFromEvent(ev, noteNames);
+            }, runId);
           }
 
           chord.forEach((note, i) => {
@@ -962,19 +1097,10 @@
       }
 
       async function refreshAccessState() {
-        try {
-          const res = await fetch('/api/access/check', { headers: getPremiumHeaders() });
-          const payload = await res.json();
-          premiumRequired = !!payload.premium_required;
-          premiumUnlocked = !!payload.unlocked;
-          if (!premiumRequired) setAccessStatus('Premium key is not required on this deployment.');
-          else if (premiumUnlocked) setAccessStatus('Premium access unlocked.');
-          else setAccessStatus('Premium key required.');
-        } catch (_) {
-          premiumRequired = true;
-          premiumUnlocked = false;
-          setAccessStatus('Could not verify premium access.');
-        }
+        premiumRequired = true;
+        const key = getPremiumKey();
+        premiumUnlocked = !!key && key === SHARED_PREMIUM_KEY;
+        setAccessStatus(premiumUnlocked ? 'Premium access unlocked.' : 'Premium key required.');
         setPaidUiState();
       }
 
@@ -1432,7 +1558,7 @@
           const loopGapMs = Math.max(0, Number(loopGapInput.value || 0));
 
           do {
-            const events = await fetchComposedEvents();
+            const events = composeEventsLocal();
             const totalMs = playEventsWebMidi(events, runId);
             loopsCompleted += 1;
             if (!loopOn) {
@@ -1453,29 +1579,71 @@
           }
         } catch (err) {
           statusEl.textContent = err.message;
-          if ((err.message || '').toLowerCase().includes('premium key required')) {
-            await refreshAccessState();
-          }
         } finally {
           button.disabled = false;
           setPaidUiState();
         }
       });
 
+      function varLen(v) {
+        let buffer = v & 0x7f;
+        while ((v >>= 7)) {
+          buffer <<= 8;
+          buffer |= ((v & 0x7f) | 0x80);
+        }
+        const out = [];
+        while (true) {
+          out.push(buffer & 0xff);
+          if (buffer & 0x80) buffer >>= 8; else break;
+        }
+        return out;
+      }
+
+      function buildMidiBlob(events, bpm) {
+        const ppq = 480;
+        const microsPerQuarter = Math.round(60000000 / Math.max(20, Math.min(300, bpm)));
+        const msgs = [];
+        msgs.push({ t: 0, b: [0xff, 0x51, 0x03, (microsPerQuarter >> 16) & 255, (microsPerQuarter >> 8) & 255, microsPerQuarter & 255] });
+        let sec = 0;
+        for (const ev of events) {
+          const chord = Array.isArray(ev.chord) ? ev.chord : [];
+          const vel = Math.max(1, Math.min(127, Number(ev.velocity || 96)));
+          const dur = Math.max(0.01, Number(ev.duration_sec || 0.2));
+          const arp = Array.isArray(ev.arpeggio_steps_sec) ? ev.arpeggio_steps_sec : [];
+          for (let i = 0; i < chord.length; i++) {
+            const n = Math.max(0, Math.min(127, Math.round(chord[i])));
+            const step = i === 0 ? 0 : Number(arp[i - 1] || 0);
+            const onSec = sec + step;
+            const offSec = onSec + dur;
+            msgs.push({ t: Math.max(0, Math.round((onSec * ppq * bpm) / 60)), b: [0x90, n, vel] });
+            msgs.push({ t: Math.max(0, Math.round((offSec * ppq * bpm) / 60)), b: [0x80, n, 0] });
+          }
+          sec += Math.max(0, Number(ev.advance_sec || 0));
+        }
+        msgs.sort((a, b) => a.t - b.t || a.b[0] - b.b[0]);
+        msgs.push({ t: msgs.length ? msgs[msgs.length - 1].t + 1 : 1, b: [0xff, 0x2f, 0x00] });
+        let prev = 0;
+        const track = [];
+        for (const m of msgs) {
+          const dt = Math.max(0, m.t - prev);
+          prev = m.t;
+          track.push(...varLen(dt), ...m.b);
+        }
+        const header = [0x4d,0x54,0x68,0x64, 0,0,0,6, 0,0, 0,1, (ppq>>8)&255, ppq&255];
+        const trkLen = track.length;
+        const trkHead = [0x4d,0x54,0x72,0x6b, (trkLen>>24)&255, (trkLen>>16)&255, (trkLen>>8)&255, trkLen&255];
+        return new Blob([new Uint8Array([...header, ...trkHead, ...track])], { type: 'audio/midi' });
+      }
+
       saveMidiBtn.addEventListener('click', async () => {
         saveMidiBtn.disabled = true;
         statusEl.textContent = 'Saving MIDI file...';
         try {
-          const data = new FormData(form);
-          const res = await fetch('/api/save-midi', { method: 'POST', body: data, headers: getPremiumHeaders() });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({ detail: 'Save failed.' }));
-            throw new Error(err.detail || 'Save failed.');
-          }
-          const blob = await res.blob();
-          const cd = res.headers.get('content-disposition') || '';
-          const match = cd.match(/filename="?([^";]+)"?/i);
-          const filename = match ? match[1] : 'text_to_midi.mid';
+          const events = composeEventsLocal();
+          const bpm = Math.max(20, Math.min(200, Number(tempoInput.value || 60)));
+          const blob = buildMidiBlob(events, bpm);
+          const base = (textArea.value || 'text_to_midi').replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 32) || 'text_to_midi';
+          const filename = `${base}.mid`;
 
           const url = URL.createObjectURL(blob);
           const a = document.createElement('a');
@@ -1489,9 +1657,6 @@
           statusEl.textContent = `Saved ${filename}`;
         } catch (err) {
           statusEl.textContent = err.message || 'Save failed.';
-          if ((err.message || '').toLowerCase().includes('premium key required')) {
-            await refreshAccessState();
-          }
         } finally {
           saveMidiBtn.disabled = false;
           setPaidUiState();
@@ -1503,13 +1668,16 @@
         recordHistoryState(false);
         statusEl.textContent = 'Randomizing...';
         try {
-          const res = await fetch('/api/randomize');
-          if (!res.ok) throw new Error('Randomize failed.');
-          const payload = await res.json();
+          const payload = {
+            text: TEXT_POOL[Math.floor(Math.random() * TEXT_POOL.length)],
+            tempo_bpm: Math.max(20, Math.min(200, Math.round(20 + Math.pow(Math.random(), 1.9) * 180))),
+            key: keySelect.options[Math.floor(Math.random() * keySelect.options.length)].value,
+            mode: modeSelect.options[Math.floor(Math.random() * modeSelect.options.length)].value
+          };
           if (!textLocked) {
             textArea.value = payload.text || '';
           }
-          tempoInput.value = payload.tempo_bpm ?? 120;
+          tempoInput.value = payload.tempo_bpm ?? 60;
           keySelect.value = payload.key || 'C';
           modeSelect.value = payload.mode || 'major';
           voicingSelect.value = Math.random() < 0.5 ? 'closed' : 'open';
@@ -1534,10 +1702,7 @@
         recordHistoryState(false);
         statusEl.textContent = 'Randomizing text...';
         try {
-          const res = await fetch('/api/randomize-text');
-          if (!res.ok) throw new Error('Randomize text failed.');
-          const payload = await res.json();
-          textArea.value = payload.text || '';
+          textArea.value = TEXT_POOL[Math.floor(Math.random() * TEXT_POOL.length)];
           statusEl.textContent = 'Randomized text.';
         } catch (err) {
           statusEl.textContent = err.message || 'Randomize text failed.';
