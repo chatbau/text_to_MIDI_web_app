@@ -496,7 +496,7 @@
     </style>
   </head>
   <body>
-    <video id="ambienceBgVideo" muted loop playsinline preload="auto">
+    <video id="ambienceBgVideo" muted loop playsinline preload="metadata">
       <source src="./flowing_grass_3.mp4" type="video/mp4" />
     </video>
     <div class="wrap">
@@ -602,7 +602,7 @@
               <div class="control-block">
                 <div class="bend-label">Ambience</div>
                 <button id="ambienceToggle" class="btn-secondary ambience-video-btn" type="button" aria-label="Ambience toggle" title="Ambience">
-                  <video id="ambienceToggleVideo" muted loop playsinline preload="auto">
+                  <video id="ambienceToggleVideo" muted loop playsinline preload="metadata">
                     <source src="./flowing_grass_cropped_1.mp4" type="video/mp4" />
                   </video>
                 </button>
@@ -983,9 +983,12 @@
         const keyPc = KEY_TO_PC[key] ?? 0;
         const target = Math.round(raw) + (Number(octaveShift || 0) * 12);
         const cands = [];
+        const len = steps.length;
+        const shift = Number(degreeShift || 0);
         for (let oct = -2; oct <= 9; oct++) {
           for (let i = 0; i < steps.length; i++) {
-            const step = steps[(i + (Number(degreeShift || 0))) % steps.length];
+            const idx = ((i + shift) % len + len) % len;
+            const step = steps[idx];
             const pc = (keyPc + step + 120) % 12;
             cands.push((oct + 1) * 12 + pc);
           }
@@ -1340,7 +1343,7 @@
       }
 
       function setAmbienceButtonVisual(on) {
-        if (!ambienceToggleVideo) return;
+        if (!ambienceToggleVideo || isShuttingDown) return;
         if (on) {
           void ambienceToggleVideo.play().catch(() => {});
         } else {
@@ -1382,6 +1385,7 @@
       }
 
       function setAmbienceVisual(on) {
+        if (isShuttingDown) return;
         setAmbienceButtonVisual(on);
         if (!ambienceBgVideo) return;
         if (on) {
@@ -2042,7 +2046,8 @@
         window.addEventListener(evtName, () => { ensureAudioContext(); }, { once: true, passive: true });
       });
 
-      window.addEventListener('beforeunload', () => {
+      function teardownForUnload() {
+        if (isShuttingDown) return;
         isShuttingDown = true;
         if (liveNotesIntervalId) {
           clearInterval(liveNotesIntervalId);
@@ -2062,19 +2067,9 @@
         if (audioCtx && audioCtx.state !== 'closed') {
           try { audioCtx.close(); } catch (_) {}
         }
-      });
-      window.addEventListener('pagehide', () => {
-        isShuttingDown = true;
-        if (liveNotesIntervalId) {
-          clearInterval(liveNotesIntervalId);
-          liveNotesIntervalId = null;
-        }
-        stopAllBrowserVoices();
-        stopLocalPlayback();
-        if (audioCtx && audioCtx.state !== 'closed') {
-          try { audioCtx.close(); } catch (_) {}
-        }
-      });
+      }
+      window.addEventListener('beforeunload', teardownForUnload);
+      window.addEventListener('pagehide', teardownForUnload);
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') {
           stopLocalPlayback();
